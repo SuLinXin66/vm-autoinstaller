@@ -29,6 +29,7 @@ _PKG_MAP=(
     "xpra:xpra:xpra:xpra:xpra"
     "python-dbus:python3-dbus:python3-dbus:python-dbus:python3-dbus"
     "xclip:xclip:xclip:xclip:xclip"
+    "wl-clipboard:wl-clipboard:wl-clipboard:wl-clipboard:wl-clipboard"
 )
 
 pkg::_detect_manager() {
