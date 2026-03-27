@@ -91,18 +91,84 @@ _chrome::ensure_xpra() {
 
     if (( current_major >= _XPRA_MIN_MAJOR )); then
         log::ok "宿主机 xpra 版本兼容 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))"
+    elif (( current_major > 0 )); then
+        log::warn "宿主机 xpra 版本过低 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))，需要 >= ${_XPRA_MIN_MAJOR}.x"
+        log::info "从 xpra.org 官方源升级..."
+        _chrome::install_xpra_from_official
+        log::ok "xpra 安装完成 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))"
+    else
+        log::info "宿主机未安装 xpra，从 xpra.org 官方源安装..."
+        _chrome::install_xpra_from_official
+        log::ok "xpra 安装完成 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))"
+    fi
+
+    # xpra 剪贴板功能依赖 python-dbus 和 xclip，缺失会导致剪贴板不可用、右键菜单卡死
+    local need_clipboard_deps=()
+    if ! python3 -c "import dbus" &>/dev/null; then
+        need_clipboard_deps+=("python-dbus")
+    fi
+    if ! command -v xclip &>/dev/null; then
+        need_clipboard_deps+=("xclip")
+    fi
+    if [[ ${#need_clipboard_deps[@]} -gt 0 ]]; then
+        log::info "安装 xpra 剪贴板依赖: ${need_clipboard_deps[*]}..."
+        sudo::ensure
+        pkg::install "${need_clipboard_deps[@]}"
+        log::ok "剪贴板依赖安装完成"
+    fi
+
+    # 检测并修补 xpra 剪贴板模块的已知 bug（某些发行版打包版本存在此问题）
+    # bug 表现：clipboard.py 从 proxy 独立导入 filter_data，但该函数仅作为类方法存在
+    _chrome::patch_clipboard_if_needed
+}
+
+# 修补 xpra GTK 剪贴板模块的 filter_data import bug
+_chrome::patch_clipboard_if_needed() {
+    local py_ver
+    py_ver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+
+    local clipboard_py=""
+    local candidates=(
+        "/usr/lib/python${py_ver}/site-packages/xpra/gtk/clipboard.py"
+        "/usr/lib/python3/dist-packages/xpra/gtk/clipboard.py"
+    )
+    for f in "${candidates[@]}"; do
+        [[ -f "$f" ]] && clipboard_py="$f" && break
+    done
+    [[ -z "$clipboard_py" ]] && return 0
+
+    # 测试是否能正常导入
+    if python3 -c "from xpra.gtk.clipboard import GTK_Clipboard" &>/dev/null; then
         return 0
     fi
 
-    if (( current_major > 0 )); then
-        log::warn "宿主机 xpra 版本过低 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))，需要 >= ${_XPRA_MIN_MAJOR}.x"
-        log::info "从 xpra.org 官方源升级..."
-    else
-        log::info "宿主机未安装 xpra，从 xpra.org 官方源安装..."
+    # 确认是已知的 filter_data import bug
+    if ! grep -q 'from xpra.clipboard.proxy import ClipboardProxyCore, filter_data' "$clipboard_py" 2>/dev/null; then
+        log::warn "xpra 剪贴板模块异常但非已知 bug，跳过修补"
+        return 0
     fi
 
-    _chrome::install_xpra_from_official
-    log::ok "xpra 安装完成 (v$(xpra --version 2>/dev/null | grep -oE '[0-9]+\.[0-9.]+' | head -1))"
+    log::info "检测到 xpra 剪贴板模块 bug，自动修补中..."
+    sudo::ensure
+
+    # 修补 1: import 行去掉独立的 filter_data
+    sudo::exec sed -i \
+        's/from xpra.clipboard.proxy import ClipboardProxyCore, filter_data/from xpra.clipboard.proxy import ClipboardProxyCore/' \
+        "$clipboard_py"
+
+    # 修补 2: filter_data(...) 调用改为 self.filter_data(...)
+    sudo::exec sed -i \
+        's/data = filter_data(/data = self.filter_data(/' \
+        "$clipboard_py"
+
+    # 清理 .pyc 缓存
+    sudo::exec find "$(dirname "$clipboard_py")/../" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+    if python3 -c "from xpra.gtk.clipboard import GTK_Clipboard" &>/dev/null; then
+        log::ok "xpra 剪贴板模块修补成功"
+    else
+        log::warn "修补后仍有问题，剪贴板可能不可用"
+    fi
 }
 
 # ============================================================
@@ -152,10 +218,16 @@ log::info "Chrome 窗口将无缝出现在宿主机桌面上"
 # 构建 SSH 参数（用于 Xpra 内部的 SSH 连接）
 SSH_OPTS="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
+# Chrome 启动参数
+CHROME_CMD="google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents"
+
 # Xpra seamless 模式：启动远程 Chrome 并直接转发窗口到宿主机
+# --clipboard=yes --clipboard-direction=both：启用双向剪贴板同步
 exec xpra start "ssh://${VM_USER}@${ip}/" \
     --ssh="$SSH_OPTS" \
-    --start-child="google-chrome-stable --no-sandbox --disable-gpu" \
+    --start-child="$CHROME_CMD" \
     --opengl=no \
     --resize-display=no \
+    --clipboard=yes \
+    --clipboard-direction=both \
     --exit-with-children

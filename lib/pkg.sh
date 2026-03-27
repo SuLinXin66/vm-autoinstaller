@@ -27,6 +27,8 @@ _PKG_MAP=(
     "libvirt-client:libvirt-clients:libvirt-client:libvirt:libvirt-client"
     "dnsmasq:dnsmasq:dnsmasq:dnsmasq:dnsmasq"
     "xpra:xpra:xpra:xpra:xpra"
+    "python-dbus:python3-dbus:python3-dbus:python-dbus:python3-dbus"
+    "xclip:xclip:xclip:xclip:xclip"
 )
 
 pkg::_detect_manager() {
