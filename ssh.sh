@@ -10,7 +10,7 @@ source "${PROJECT_ROOT}/lib/vm.sh"
 source "${PROJECT_ROOT}/config.env"
 
 VM_NAME="${VM_NAME:-ubuntu-server}"
-VM_USER="${VM_USER:-ubuntu}"
+VM_USER="${VM_USER:-wpsweb}"
 DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
 

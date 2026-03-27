@@ -274,6 +274,68 @@ vm::wait_ready() {
     done
 }
 
+# 启动已存在的 VM 并等待 IP + SSH 就绪（不含 cloud-init 监控和控制台流）
+vm::start() {
+    local name="$1"
+    local user="$2"
+
+    if ! vm::exists "$name"; then
+        log::error "VM [${name}] 不存在"
+        return 1
+    fi
+
+    if vm::is_running "$name"; then
+        log::ok "VM [${name}] 已在运行"
+    else
+        log::info "启动 VM [${name}]..."
+        _vm::virsh start "$name"
+        log::ok "VM [${name}] 已启动"
+    fi
+
+    # 等待 IP 地址
+    log::info "等待 VM 获取 IP 地址..."
+    sleep 5
+    local ip="" elapsed=5 interval=3
+
+    while [[ -z "$ip" ]]; do
+        ip="$(vm::get_ip "$name" 2>/dev/null)" || true
+        if [[ -n "$ip" ]]; then break; fi
+
+        sleep "$interval"
+        (( elapsed += interval ))
+
+        if (( elapsed >= 60 )); then
+            log::error "VM 在 60s 内未获取到 IP"
+            return 1
+        fi
+    done
+
+    log::ok "VM 已获取 IP: ${ip}"
+
+    # 等待 SSH 就绪
+    log::info "等待 SSH 就绪..."
+    local ssh_elapsed=0
+
+    while true; do
+        if _vm::_ssh_test "$user" "$ip"; then
+            break
+        fi
+
+        sleep "$interval"
+        (( ssh_elapsed += interval ))
+
+        if (( ssh_elapsed >= 60 )); then
+            log::warn "SSH 在 60s 内未就绪，但 VM 正在运行"
+            echo "$ip"
+            return 0
+        fi
+    done
+
+    log::ok "SSH 已就绪 (${user}@${ip})"
+    echo "$ip"
+    return 0
+}
+
 vm::create_disk() {
     local base_image="$1"
     local disk_path="$2"

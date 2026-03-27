@@ -22,8 +22,7 @@ VM_NAME="${VM_NAME:-ubuntu-server}"
 VM_CPUS="${VM_CPUS:-2}"
 VM_MEMORY="${VM_MEMORY:-2048}"
 VM_DISK_SIZE="${VM_DISK_SIZE:-20}"
-VM_USER="${VM_USER:-ubuntu}"
-VM_PASSWORD="${VM_PASSWORD:-ubuntu}"
+VM_USER="${VM_USER:-wpsweb}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-24.04}"
 NETWORK_MODE="${NETWORK_MODE:-nat}"
 BRIDGE_NAME="${BRIDGE_NAME:-br0}"
@@ -181,8 +180,8 @@ SSH_PUBLIC_KEY="$(cat "${SSH_KEY_PATH}.pub")"
 
 # Render cloud-init template
 log::info "生成 cloud-init 配置..."
-export VM_NAME VM_USER VM_PASSWORD SSH_PUBLIC_KEY
-envsubst '${VM_NAME} ${VM_USER} ${VM_PASSWORD} ${SSH_PUBLIC_KEY}' \
+export VM_NAME VM_USER SSH_PUBLIC_KEY
+envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY}' \
     < "${PROJECT_ROOT}/cloud-init/user-data.yaml.tpl" > "$USER_DATA"
 
 # Create seed ISO
@@ -207,11 +206,12 @@ if vm_ip="$(vm::wait_ready "$VM_NAME" "$VM_USER")"; then
     echo ""
     echo "  VM 已就绪！连接信息："
     echo ""
-    echo "    SSH:  ssh ${VM_USER}@${vm_ip}"
-    echo "    密码: ${VM_PASSWORD}"
+    echo "    SSH:     ssh -i ${SSH_KEY_PATH} ${VM_USER}@${vm_ip}"
+    echo "    密钥:    ${SSH_KEY_PATH}"
     echo ""
     echo "  快捷命令："
     echo "    ./ssh.sh           SSH 连入 VM"
+    echo "    ./chrome.sh        启动 Chrome 浏览器"
     echo "    ./status.sh        查看 VM 状态"
     echo "    ./destroy.sh       销毁 VM"
     echo ""

@@ -26,6 +26,7 @@ _PKG_MAP=(
     "qemu-img:qemu-utils:qemu-img:qemu-img:qemu-tools"
     "libvirt-client:libvirt-clients:libvirt-client:libvirt:libvirt-client"
     "dnsmasq:dnsmasq:dnsmasq:dnsmasq:dnsmasq"
+    "xpra:xpra:xpra:xpra:xpra"
 )
 
 pkg::_detect_manager() {

@@ -40,4 +40,12 @@ fi
 sudo::ensure
 vm::destroy "$VM_NAME" "$DATA_DIR"
 
+# 清理自动生成的 SSH 密钥对
+SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
+if [[ -f "$SSH_KEY_PATH" ]] || [[ -f "${SSH_KEY_PATH}.pub" ]]; then
+    log::info "清理 SSH 密钥对..."
+    rm -f "$SSH_KEY_PATH" "${SSH_KEY_PATH}.pub"
+    log::ok "SSH 密钥对已删除"
+fi
+
 log::banner "清理完成"
