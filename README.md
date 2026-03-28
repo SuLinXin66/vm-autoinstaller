@@ -17,7 +17,7 @@ cp config.env.example config.env
 vim config.env
 
 # 2. 智能启动（首次自动安装，后续直接启动）
-./startup.sh
+./setup.sh
 
 # 3. SSH 连入
 ./ssh.sh
@@ -30,9 +30,10 @@ vim config.env
 
 | 脚本 | 功能 |
 |------|------|
-| `startup.sh` | 智能入口：VM 不存在时自动安装，已存在时直接启动 |
-| `install.sh` | 完整安装：依赖安装、镜像下载、VM 创建、Docker/Chrome 安装 |
-| `start.sh` | 启动已存在的 VM，等待 IP 和 SSH 就绪 |
+| `setup.sh` | 智能入口：VM 不存在时自动安装，已存在时直接启动 |
+| `install.sh` | 完整安装：依赖安装、镜像下载、VM 创建、Docker 安装 + 扩展模块 |
+| `start.sh` | 启动已存在的 VM，等待就绪后执行扩展模块增量检查 |
+| `provision.sh` | 扩展模块执行入口：推送并执行 extensions/ 中的脚本 |
 | `destroy.sh` | 销毁 VM、清理磁盘文件和 SSH 密钥 |
 | `status.sh` | 查看 VM 运行状态和连接信息 |
 | `ssh.sh` | 快捷 SSH 连入 VM |
@@ -58,14 +59,18 @@ vim config.env
 ## 项目结构
 
 ```
-├── startup.sh              智能入口（自动判断安装/启动）
+├── setup.sh                智能入口（自动判断安装/启动）
 ├── install.sh              完整安装
 ├── start.sh                启动已有 VM
+├── provision.sh            扩展模块执行入口
 ├── destroy.sh              销毁 VM
 ├── status.sh               查看状态
 ├── ssh.sh                  SSH 连入
 ├── chrome.sh               Xpra Chrome 转发
 ├── config.env              配置文件
+├── extensions/             扩展模块目录
+│   ├── 10-chrome-xpra.sh   Chrome + Xpra 安装
+│   └── 20-example.sh       示例模板
 ├── lib/
 │   ├── log.sh              日志模块
 │   ├── pkg.sh              跨发行版包管理
@@ -105,13 +110,42 @@ Chrome 窗口将通过 Xpra 的 seamless 模式直接出现在宿主机桌面上
 - 宿主机需要有图形桌面环境
 - 宿主机需安装 `xpra`（`chrome.sh` 会自动检测并安装）
 
+## 扩展系统
+
+通过 `extensions/` 目录管理 VM 内的软件安装扩展，支持幂等执行和增量更新。
+
+### 工作原理
+
+- **首次安装**：`install.sh` 完成 cloud-init（Docker）后，自动调用 `provision.sh` 执行全部扩展
+- **日常启动**：`start.sh` / `setup.sh` 启动 VM 后，自动调用 `provision.sh` 做增量检查（已安装的秒级跳过）
+- **手动执行**：新增扩展后直接运行 `./provision.sh`，无需重建 VM
+
+### 创建新扩展
+
+1. 复制示例模板：
+
+```bash
+cp extensions/20-example.sh extensions/30-my-app.sh
+```
+
+2. 编辑脚本，替换安装逻辑
+3. 运行 `./provision.sh` 或 `./setup.sh`
+
+### 扩展规范
+
+- 文件名格式：`NN-name.sh`（NN 控制执行顺序）
+- 幂等保证：通过 `/opt/kvm-extensions/<name>.done` 标记文件
+- 以 root 权限运行
+- 建议编号：10-29 基础设施，30-49 开发工具，50-69 业务应用，70+ 自定义
+
 ## 工作原理
 
 1. 检测宿主机环境，自动安装 KVM/libvirt 依赖
 2. 下载 Ubuntu Cloud Image（已下载则跳过）
 3. 基于 cloud image 创建 qcow2 磁盘
 4. 自动生成 SSH 密钥对用于安全认证
-5. 通过 cloud-init 模板生成初始化配置（含 Docker、Chrome、Xpra 安装）
+5. 通过 cloud-init 模板生成初始化配置（Docker 安装）
 6. `virt-install` 创建 VM 并导入磁盘
-7. cloud-init 在 VM 内自动完成系统配置和软件安装
-8. VM 就绪后输出 SSH 连接信息
+7. cloud-init 在 VM 内完成基础设施安装
+8. VM 就绪后通过扩展系统安装 Chrome/Xpra 等软件
+9. 输出 SSH 连接信息

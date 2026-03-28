@@ -202,6 +202,10 @@ log::step "监控 VM 安装进度"
 
 vm::set_ssh_key "$SSH_KEY_PATH"
 if vm_ip="$(vm::wait_ready "$VM_NAME" "$VM_USER")"; then
+    # cloud-init 完成后，执行扩展模块（Chrome/Xpra 等）
+    log::info "开始执行扩展模块..."
+    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ./provision.sh 重试"
+
     log::banner "安装完成"
     echo ""
     echo "  VM 已就绪！连接信息："

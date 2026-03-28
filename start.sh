@@ -18,7 +18,7 @@ DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
 
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./install.sh 或 ./startup.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ./install.sh 或 ./setup.sh"
 fi
 
 # 设置 SSH 密钥（用于 vm::start 中的 SSH 测试）
@@ -29,6 +29,9 @@ fi
 sudo::ensure
 
 if vm_ip="$(vm::start "$VM_NAME" "$VM_USER")"; then
+    # VM 就绪后执行扩展模块增量检查（已安装的秒级跳过，新增的自动执行）
+    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ./provision.sh 重试"
+
     log::banner "VM 已就绪"
     echo ""
     echo "  连接信息："

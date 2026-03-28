@@ -242,7 +242,7 @@ _chrome::cleanup_stale_sessions() {
 
 # 检查 VM 是否存在且运行
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./startup.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ./setup.sh"
 fi
 
 if ! vm::is_running "$VM_NAME"; then
