@@ -139,6 +139,15 @@ if [[ -d "$DOTFILES_DIR" ]]; then
             || log::warn ".config/zshrc/ 同步失败"
     fi
 
+    # zsh 补全片段（整目录 scp，避免 glob * 不匹配 .gitkeep 等点开头条目）
+    if [[ -d "${DOTFILES_DIR}/.config/zsh/completions" ]]; then
+        log::info "同步 .config/zsh/completions/..."
+        ssh "${_ssh_sync_opts[@]}" "${VM_USER}@${ip}" "mkdir -p ~/.config/zsh" 2>/dev/null || true
+        scp "${_ssh_sync_opts[@]}" -r "${DOTFILES_DIR}/.config/zsh/completions" "${VM_USER}@${ip}:~/.config/zsh/" 2>/dev/null \
+            && log::ok ".config/zsh/completions/ 已同步" \
+            || log::warn ".config/zsh/completions/ 同步失败"
+    fi
+
     # oh-my-posh 主题
     if [[ -f "${DOTFILES_DIR}/.config/ohmyposh/ys.omp.json" ]]; then
         log::info "同步 oh-my-posh 主题..."

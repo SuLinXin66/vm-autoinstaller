@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 扩展脚本：推送 vm\extensions\*.sh 到客户机并顺序执行（跳过 20-example.sh）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -115,6 +115,7 @@ if (Test-Path -LiteralPath $dotfilesDir) {
     $syncItems = @(
         @{ Src = (Join-Path $dotfilesDir '.zshrc');                          Dst = '.zshrc';                        Type = 'file' },
         @{ Src = (Join-Path $dotfilesDir '.config\zshrc');                   Dst = '.config/zshrc';                 Type = 'dir'  },
+        @{ Src = (Join-Path $dotfilesDir '.config\zsh\completions');          Dst = '.config/zsh/completions';       Type = 'dir'  },
         @{ Src = (Join-Path $dotfilesDir '.config\ohmyposh\ys.omp.json');    Dst = '.config/ohmyposh/ys.omp.json';  Type = 'file' },
         @{ Src = (Join-Path $dotfilesDir '.config\fastfetch\config.jsonc');  Dst = '.config/fastfetch/config.jsonc'; Type = 'file' },
         @{ Src = (Join-Path $dotfilesDir '.config\yazi');                    Dst = '.config/yazi';                  Type = 'dir'  }

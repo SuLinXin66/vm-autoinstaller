@@ -55,8 +55,11 @@ eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/ys.omp.json)"
 # Shipped Theme
 # eval "$(oh-my-posh init zsh --config /usr/share/oh-my-posh/themes/agnoster.omp.json)"
 
-#export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
-# 添加补全功能到 fpath
-fpath=(${ASDF_DATA_DIR:-$HOME/.asdf}/completions $fpath)
+# asdf zsh 补全：由扩展脚本运行 `asdf completion zsh > ~/.asdf/completions/_asdf` 生成
+fpath=(
+  "$HOME/.config/zsh/completions"
+  "${ASDF_DATA_DIR:-$HOME/.asdf}/completions"
+  $fpath
+)
 # 使用 ZSH 的 compinit 初始化补全功能
 autoload -Uz compinit && compinit
