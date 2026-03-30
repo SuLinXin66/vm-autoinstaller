@@ -113,3 +113,58 @@ done
 
 log::banner "扩展执行完成"
 log::info "共处理 ${#extensions[@]} 个扩展"
+
+# ── 同步项目内置配置到 VM ──────────────────────────────────
+DOTFILES_DIR="${REPO_ROOT}/vm/config/dotfiles"
+
+if [[ -d "$DOTFILES_DIR" ]]; then
+    log::banner "同步内置配置到 VM"
+
+    _ssh_sync_opts=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
+
+    # .zshrc
+    if [[ -f "${DOTFILES_DIR}/.zshrc" ]]; then
+        log::info "同步 .zshrc..."
+        scp "${_ssh_sync_opts[@]}" "${DOTFILES_DIR}/.zshrc" "${VM_USER}@${ip}:~/.zshrc" 2>/dev/null \
+            && log::ok ".zshrc 已同步" \
+            || log::warn ".zshrc 同步失败"
+    fi
+
+    # .config/zshrc/
+    if [[ -d "${DOTFILES_DIR}/.config/zshrc" ]]; then
+        log::info "同步 .config/zshrc/..."
+        ssh "${_ssh_sync_opts[@]}" "${VM_USER}@${ip}" "mkdir -p ~/.config/zshrc" 2>/dev/null || true
+        scp "${_ssh_sync_opts[@]}" -r "${DOTFILES_DIR}/.config/zshrc"/* "${VM_USER}@${ip}:~/.config/zshrc/" 2>/dev/null \
+            && log::ok ".config/zshrc/ 已同步" \
+            || log::warn ".config/zshrc/ 同步失败"
+    fi
+
+    # oh-my-posh 主题
+    if [[ -f "${DOTFILES_DIR}/.config/ohmyposh/ys.omp.json" ]]; then
+        log::info "同步 oh-my-posh 主题..."
+        ssh "${_ssh_sync_opts[@]}" "${VM_USER}@${ip}" "mkdir -p ~/.config/ohmyposh" 2>/dev/null || true
+        scp "${_ssh_sync_opts[@]}" "${DOTFILES_DIR}/.config/ohmyposh/ys.omp.json" "${VM_USER}@${ip}:~/.config/ohmyposh/ys.omp.json" 2>/dev/null \
+            && log::ok "oh-my-posh 主题已同步" \
+            || log::warn "oh-my-posh 主题同步失败"
+    fi
+
+    # fastfetch
+    if [[ -f "${DOTFILES_DIR}/.config/fastfetch/config.jsonc" ]]; then
+        log::info "同步 fastfetch 配置..."
+        ssh "${_ssh_sync_opts[@]}" "${VM_USER}@${ip}" "mkdir -p ~/.config/fastfetch" 2>/dev/null || true
+        scp "${_ssh_sync_opts[@]}" "${DOTFILES_DIR}/.config/fastfetch/config.jsonc" "${VM_USER}@${ip}:~/.config/fastfetch/config.jsonc" 2>/dev/null \
+            && log::ok "fastfetch 配置已同步" \
+            || log::warn "fastfetch 配置同步失败"
+    fi
+
+    # yazi
+    if [[ -d "${DOTFILES_DIR}/.config/yazi" ]] && compgen -G "${DOTFILES_DIR}/.config/yazi/*" >/dev/null; then
+        log::info "同步 yazi 配置..."
+        ssh "${_ssh_sync_opts[@]}" "${VM_USER}@${ip}" "mkdir -p ~/.config/yazi" 2>/dev/null || true
+        scp "${_ssh_sync_opts[@]}" -r "${DOTFILES_DIR}/.config/yazi"/* "${VM_USER}@${ip}:~/.config/yazi/" 2>/dev/null \
+            && log::ok "yazi 配置已同步" \
+            || log::warn "yazi 配置同步失败"
+    fi
+
+    log::info "配置同步完成"
+fi

@@ -258,6 +258,18 @@ if [[ ! -f "$SSH_KEY_PATH" ]]; then
     log::die "SSH 密钥不存在: ${SSH_KEY_PATH}，请先运行 ./install.sh"
 fi
 
+# 同步 Chrome 书签策略文件到 VM
+_BOOKMARKS_JSON="${REPO_ROOT}/vm/config/chrome-bookmarks.json"
+if [[ -f "$_BOOKMARKS_JSON" ]]; then
+    log::info "同步 Chrome 书签..."
+    _ssh_opts=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
+    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mkdir -p /etc/opt/chrome/policies/managed" 2>/dev/null || true
+    scp "${_ssh_opts[@]}" "$_BOOKMARKS_JSON" "${VM_USER}@${ip}:/tmp/bookmarks.json" 2>/dev/null \
+        && ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mv /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json" 2>/dev/null \
+        && log::ok "书签已同步" \
+        || log::warn "书签同步失败，继续启动"
+fi
+
 # 确保宿主机 xpra 版本与 VM 端兼容，安装剪贴板依赖
 _chrome::ensure_xpra
 
