@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 扩展脚本：推送 vm\extensions\*.sh 到客户机并顺序执行（跳过 20-example.sh）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -105,3 +105,46 @@ foreach ($f in $scripts) {
 
 Write-LogBanner -Title '扩展执行完成'
 Write-LogInfo "成功: $ok, 失败: $fail, 合计: $($scripts.Count)"
+
+# ── 同步项目内置配置到 VM ──────────────────────────────────
+$dotfilesDir = Join-Path $VMDir 'config\dotfiles'
+
+if (Test-Path -LiteralPath $dotfilesDir) {
+    Write-LogBanner -Title '同步内置配置到 VM'
+
+    $syncItems = @(
+        @{ Src = (Join-Path $dotfilesDir '.zshrc');                          Dst = '.zshrc';                        Type = 'file' },
+        @{ Src = (Join-Path $dotfilesDir '.config\zshrc');                   Dst = '.config/zshrc';                 Type = 'dir'  },
+        @{ Src = (Join-Path $dotfilesDir '.config\ohmyposh\ys.omp.json');    Dst = '.config/ohmyposh/ys.omp.json';  Type = 'file' },
+        @{ Src = (Join-Path $dotfilesDir '.config\fastfetch\config.jsonc');  Dst = '.config/fastfetch/config.jsonc'; Type = 'file' },
+        @{ Src = (Join-Path $dotfilesDir '.config\yazi');                    Dst = '.config/yazi';                  Type = 'dir'  }
+    )
+
+    foreach ($item in $syncItems) {
+        if (-not (Test-Path -LiteralPath $item.Src)) {
+            continue
+        }
+        Write-LogInfo "同步 $($item.Dst)..."
+        $remotePar = Split-Path -Parent $item.Dst
+        if ($remotePar) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "mkdir -p ~/$remotePar" 2>&1
+            $ErrorActionPreference = $prevEAP
+        }
+        if ($item.Type -eq 'dir') {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $null = & $scpExe @scpBaseArgs -r $item.Src "${vmUser}@${vmHost}:~/$($item.Dst)" 2>&1
+            $ErrorActionPreference = $prevEAP
+        } else {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $null = & $scpExe @scpBaseArgs $item.Src "${vmUser}@${vmHost}:~/$($item.Dst)" 2>&1
+            $ErrorActionPreference = $prevEAP
+        }
+        if ($LASTEXITCODE -eq 0) { Write-LogOk "$($item.Dst) 已同步" } else { Write-LogWarn "$($item.Dst) 同步失败" }
+    }
+
+    Write-LogInfo '配置同步完成'
+}

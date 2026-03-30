@@ -36,6 +36,22 @@ if (-not (Test-Path -LiteralPath $sshKeyPath)) {
 
 Set-SSHKeyPath -Path $sshKeyPath
 $sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
+$scpExe = (Get-Command scp.exe -ErrorAction Stop).Source
+$baseArgs = (Get-SshBaseArgs) + @('-p', "$vmPort")
+$scpBaseArgs = (Get-SshBaseArgs) + @('-P', "$vmPort")
+
+# 同步 Chrome 书签策略文件到 VM
+$bookmarksJson = Join-Path $VMDir 'config\chrome-bookmarks.json'
+if (Test-Path -LiteralPath $bookmarksJson) {
+    Write-LogInfo '同步 Chrome 书签...'
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mkdir -p /etc/opt/chrome/policies/managed' 2>&1
+    $null = & $scpExe @scpBaseArgs $bookmarksJson "${vmUser}@${vmHost}:/tmp/bookmarks.json" 2>&1
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mv /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json' 2>&1
+    $ErrorActionPreference = $prevEAP
+    if ($LASTEXITCODE -eq 0) { Write-LogOk '书签已同步' } else { Write-LogWarn '书签同步失败，继续启动' }
+}
 
 function Find-VcXsrvExe {
     $names = @(
