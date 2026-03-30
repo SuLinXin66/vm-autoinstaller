@@ -77,7 +77,7 @@ if ($vcxsrv) {
         '-Y',
         '-p', "$vmPort",
         "${vmUser}@${vmHost}",
-        'google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents'
+        'LANGUAGE=zh_CN LANG=zh_CN.UTF-8 google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN'
     )
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -88,7 +88,7 @@ if ($vcxsrv) {
 
 # --- 回退：xpra HTML5（需在客户机已安装 xpra，可由扩展脚本安装）---
 Write-LogWarn 'VcXsrv 不可用，改用 xpra HTML5（浏览器打开）...'
-$bashOneLiner = 'xpra stop :100 2>/dev/null || true; nohup xpra start :100 --bind-tcp=0.0.0.0:10000 --start-child="google-chrome-stable --no-sandbox --disable-gpu" --html5=on --daemon=yes </dev/null >/tmp/xpra-chrome.log 2>&1 & echo ok'
+$bashOneLiner = 'export LANGUAGE=zh_CN LANG=zh_CN.UTF-8; xpra stop :100 2>/dev/null || true; nohup xpra start :100 --bind-tcp=0.0.0.0:10000 --start-child="google-chrome-stable --no-sandbox --disable-gpu --lang=zh-CN" --html5=on --daemon=yes </dev/null >/tmp/xpra-chrome.log 2>&1 & echo ok'
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'

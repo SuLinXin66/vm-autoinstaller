@@ -40,8 +40,7 @@ apt-get install -y -q \
     xpra-html5 \
     xauth \
     xvfb \
-    dbus-x11 \
-    fonts-noto-cjk
+    dbus-x11
 
 echo "[5/5] 验证安装..."
 google-chrome-stable --version

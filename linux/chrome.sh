@@ -271,10 +271,11 @@ log::info "Chrome 窗口将无缝出现在宿主机桌面上"
 SSH_OPTS="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 # Chrome 启动参数
-CHROME_CMD="google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents"
+CHROME_CMD="google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN"
 
 # Xpra seamless 模式：启动远程 Chrome 并直接转发窗口到宿主机
 # --clipboard=yes --clipboard-direction=both：启用双向剪贴板同步
+export LANGUAGE=zh_CN LANG=zh_CN.UTF-8
 exec xpra start "ssh://${VM_USER}@${ip}/" \
     --ssh="$SSH_OPTS" \
     --start-child="$CHROME_CMD" \
