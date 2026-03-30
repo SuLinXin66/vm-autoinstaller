@@ -2,6 +2,11 @@
 $ErrorActionPreference = 'Stop'
 
 # SSH 等原生命令返回 UTF-8 输出，必须统一设置控制台编码
+# PS 5.1 下 UTF-8 无 BOM 的脚本会把中文源码误读；仓库内 .ps1/.psm1 已带 BOM。
+# chcp 65001 让传统 conhost 与部分宿主正确显示 UTF-8。
+try {
+    $null = cmd /c "chcp 65001>nul"
+} catch {}
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $global:OutputEncoding = [System.Text.Encoding]::UTF8
 

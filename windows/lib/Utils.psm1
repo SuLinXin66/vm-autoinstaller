@@ -42,11 +42,18 @@ function Invoke-FileDownload {
     Write-Host "[INFO ] 下载 $desc ..."
 
     # 优先 curl.exe：实时显示进度条、速度、剩余时间
+    # Windows Schannel 在校验证书吊销时需访问 CRL/OCSP；若网络拦了吊销服务器会报
+    # CRYPT_E_REVOCATION_OFFLINE (curl 35)。第二次加 --ssl-no-revoke 仅跳过吊销检查（仍校验证书本身）。
     $curlExe = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
     if ($curlExe) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         & $curlExe.Source -fSL --progress-bar -o $DestinationPath "$Uri"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[WARN ] curl 首次下载失败（常见于吊销服务器不可达），使用 --ssl-no-revoke 重试..."
+            Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
+            & $curlExe.Source -fSL --progress-bar --ssl-no-revoke -o $DestinationPath "$Uri"
+        }
         $ErrorActionPreference = $prevEAP
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK   ] 下载完成: $desc"
