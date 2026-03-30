@@ -1,0 +1,10 @@
+[[mgr.prepend_keymap]]
+on = ["Y"]
+run = '''
+shell --block '
+for f in "$@"; do
+  printf "file://%s\r\n" "$(realpath "$f")"
+done | wl-copy --type text/uri-list
+'
+'''
+desc = "Copy selected files as URI list"

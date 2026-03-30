@@ -1,8 +1,0 @@
-# -----------------------------------------------------
-# Login banner (VM / headless friendly — 无 ML4W 依赖)
-# -----------------------------------------------------
-
-# 新建空文件 ~/.hide-fastfetch 可关闭登录时 fastfetch
-if [[ $(tty) == *pts* ]] && [[ ! -f $HOME/.hide-fastfetch ]]; then
-    command -v fastfetch &>/dev/null && fastfetch
-fi

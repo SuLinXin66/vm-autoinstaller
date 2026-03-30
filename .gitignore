@@ -1,5 +1,16 @@
 # User-specific configuration
-vm/config.env
+scripts/vm/config.env
+
+# Build artifacts
+dist/
+cmd/installer/staging/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 
 # Editor / IDE
 *.swp

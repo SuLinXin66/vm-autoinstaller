@@ -1,0 +1,65 @@
+# -----------------------------------------------------
+# CUSTOMIZATION
+# -----------------------------------------------------
+POSH=agnoster
+
+# -----------------------------------------------------
+# oh-myzsh themes: https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
+# -----------------------------------------------------
+# ZSH_THEME=robbyrussell
+
+# -----------------------------------------------------
+# oh-my-zsh plugins
+# -----------------------------------------------------
+plugins=(
+    git
+    sudo
+    web-search
+    debian
+    zsh-autosuggestions
+    fast-syntax-highlighting
+    z
+    copyfile
+    copybuffer
+    dirhistory
+)
+
+# Set-up oh-my-zsh
+source $ZSH/oh-my-zsh.sh
+
+# -----------------------------------------------------
+# FZF 键位（Ctrl+R 等）
+# Ubuntu apt 的 fzf 较旧，无 --zsh；优先用发行版自带示例脚本
+# -----------------------------------------------------
+if [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
+    source /usr/share/doc/fzf/examples/key-bindings.zsh
+elif [[ -f /usr/share/fzf/key-bindings.zsh ]]; then
+    source /usr/share/fzf/key-bindings.zsh
+elif command -v fzf >/dev/null && fzf --help 2>&1 | grep -Fq -- '--zsh'; then
+    source <(fzf --zsh)
+fi
+
+# zsh history
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt appendhistory
+
+# -----------------------------------------------------
+# Prompt
+# -----------------------------------------------------
+#eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/zen.toml)"
+eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/ys.omp.json)"
+# eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/EDM115-newline.omp.json)"
+
+# Shipped Theme
+# eval "$(oh-my-posh init zsh --config /usr/share/oh-my-posh/themes/agnoster.omp.json)"
+
+# asdf zsh 补全：由扩展脚本运行 `asdf completion zsh > ~/.asdf/completions/_asdf` 生成
+fpath=(
+  "$HOME/.config/zsh/completions"
+  "${ASDF_DATA_DIR:-$HOME/.asdf}/completions"
+  $fpath
+)
+# 使用 ZSH 的 compinit 初始化补全功能
+autoload -Uz compinit && compinit
