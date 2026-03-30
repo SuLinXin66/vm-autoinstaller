@@ -1,5 +1,5 @@
-# User-specific configuration (contains passwords)
-config.env
+# User-specific configuration
+vm/config.env
 
 # Editor / IDE
 *.swp

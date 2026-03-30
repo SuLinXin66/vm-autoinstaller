@@ -5,6 +5,7 @@ set -euo pipefail
 # Chrome 窗口将直接出现在宿主机桌面上，与原生应用无差别
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
 
 source "${PROJECT_ROOT}/lib/log.sh"
 source "${PROJECT_ROOT}/lib/sudo.sh"
@@ -12,8 +13,8 @@ source "${PROJECT_ROOT}/lib/sys.sh"
 source "${PROJECT_ROOT}/lib/pkg.sh"
 source "${PROJECT_ROOT}/lib/vm.sh"
 
-[[ -f "${PROJECT_ROOT}/config.env" ]] || { echo "错误: config.env 不存在，请先 cp config.env.example config.env" >&2; exit 1; }
-source "${PROJECT_ROOT}/config.env"
+[[ -f "${REPO_ROOT}/vm/config.env" ]] || { echo "错误: config.env 不存在，请先 cp vm/config.env.example vm/config.env" >&2; exit 1; }
+source "${REPO_ROOT}/vm/config.env"
 
 VM_NAME="${VM_NAME:-ubuntu-server}"
 VM_USER="${VM_USER:-wpsweb}"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
 
 # Load libraries
 source "${PROJECT_ROOT}/lib/log.sh"
@@ -12,10 +13,10 @@ source "${PROJECT_ROOT}/lib/utils.sh"
 source "${PROJECT_ROOT}/lib/vm.sh"
 
 # Load configuration
-if [[ ! -f "${PROJECT_ROOT}/config.env" ]]; then
-    log::die "配置文件 config.env 不存在，请先复制模板：cp config.env.example config.env"
+if [[ ! -f "${REPO_ROOT}/vm/config.env" ]]; then
+    log::die "配置文件 config.env 不存在，请先复制模板：cp vm/config.env.example vm/config.env"
 fi
-source "${PROJECT_ROOT}/config.env"
+source "${REPO_ROOT}/vm/config.env"
 
 # Allow environment variable overrides
 VM_NAME="${VM_NAME:-ubuntu-server}"
@@ -182,7 +183,7 @@ SSH_PUBLIC_KEY="$(cat "${SSH_KEY_PATH}.pub")"
 log::info "生成 cloud-init 配置..."
 export VM_NAME VM_USER SSH_PUBLIC_KEY
 envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY}' \
-    < "${PROJECT_ROOT}/cloud-init/user-data.yaml.tpl" > "$USER_DATA"
+    < "${REPO_ROOT}/vm/cloud-init/user-data.yaml.tpl" > "$USER_DATA"
 
 # Create seed ISO
 vm::create_seed_iso "$USER_DATA" "$SEED_ISO"
