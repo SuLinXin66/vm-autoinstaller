@@ -5,6 +5,7 @@ package pathmgr
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -29,6 +30,9 @@ func AddToPath(binDir string) ([]string, error) {
 	if pathModified {
 		modified = append(modified, "HKCU\\Environment\\Path")
 	}
+
+	// --- PowerShell execution policy ---
+	ensurePSExecutionPolicy()
 
 	// --- PowerShell profile completion ---
 	profiles := psProfilePaths()
@@ -227,4 +231,21 @@ func removeBlockFromContent(content, begin, end string) string {
 		result = append(result, line)
 	}
 	return strings.Join(result, "\n")
+}
+
+// ensurePSExecutionPolicy sets CurrentUser execution policy to RemoteSigned
+// when it is Restricted or Undefined, so that PowerShell profile scripts
+// (including the completion loader we inject) can run without errors.
+func ensurePSExecutionPolicy() {
+	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command",
+		"Get-ExecutionPolicy -Scope CurrentUser").Output()
+	if err != nil {
+		return
+	}
+	policy := strings.TrimSpace(string(out))
+	switch policy {
+	case "Restricted", "Undefined":
+		_ = exec.Command("powershell.exe", "-NoProfile", "-Command",
+			"Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force").Run()
+	}
 }
