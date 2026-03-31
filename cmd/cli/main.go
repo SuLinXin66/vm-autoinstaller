@@ -585,11 +585,16 @@ func showInfo() error {
 
 func runVirsh(args ...string) (string, error) {
 	allArgs := append([]string{"-c", "qemu:///system"}, args...)
-	out, err := exec.Command("virsh", allArgs...).CombinedOutput()
+
+	cmd := exec.Command("virsh", allArgs...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), nil
 	}
-	sudoArgs := append([]string{"-n", "virsh"}, allArgs...)
+
+	// sudo resets env, so pass LC_ALL=C via env(1)
+	sudoArgs := append([]string{"-n", "env", "LC_ALL=C", "virsh"}, allArgs...)
 	out, err = exec.Command("sudo", sudoArgs...).CombinedOutput()
 	if err == nil {
 		return string(out), nil
@@ -631,6 +636,9 @@ func addKVMInfo(t *table.Table, vmName string) {
 		return
 	case "paused":
 		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已暂停"))
+		return
+	case "":
+		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未知"))
 		return
 	default:
 		t.AddRow("VM 状态", state)
