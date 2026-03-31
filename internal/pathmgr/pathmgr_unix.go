@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 )
 
 func markerBegin() string { return fmt.Sprintf("# >>> %s >>>", buildinfo.AppName) }
@@ -18,8 +19,9 @@ func exportLine(binDir string) string {
 	return fmt.Sprintf("export PATH=\"%s:$PATH\"", binDir)
 }
 
-func completionLine(shell string) string {
-	return fmt.Sprintf("eval \"$(%s completion %s)\"", buildinfo.AppName, shell)
+func completionSourceLine(shell string) string {
+	f := paths.CompletionFilePath(shell)
+	return fmt.Sprintf("[ -f \"%s\" ] && source \"%s\"", f, f)
 }
 
 func markerBlock(binDir, shell string) string {
@@ -28,7 +30,7 @@ func markerBlock(binDir, shell string) string {
 		exportLine(binDir),
 	}
 	if shell != "" {
-		lines = append(lines, completionLine(shell))
+		lines = append(lines, completionSourceLine(shell))
 	}
 	lines = append(lines, markerEnd())
 	return strings.Join(lines, "\n") + "\n"

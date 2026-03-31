@@ -58,6 +58,14 @@ func ConfigSnapshotPath() string {
 	return filepath.Join(DataRoot(), ".config-snapshot.env")
 }
 
+func CompletionDir() string {
+	return filepath.Join(DataRoot(), "completions")
+}
+
+func CompletionFilePath(shell string) string {
+	return filepath.Join(CompletionDir(), buildinfo.AppName+"."+shell)
+}
+
 func ScriptDir() string {
 	switch runtime.GOOS {
 	case "windows":

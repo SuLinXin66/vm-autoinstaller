@@ -12,11 +12,11 @@ import (
 
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/config"
-	"github.com/SuLinXin66/vm-autoinstaller/internal/table"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/meta"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/runner"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/table"
 )
 
 func main() {
@@ -38,6 +38,10 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	root.CompletionOptions = cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	}
+
 	root.AddCommand(
 		newSetupCmd(),
 		newStopCmd(),
@@ -53,9 +57,74 @@ func newRootCmd() *cobra.Command {
 		newSyncCmd(),
 		newUpgradeCmd(),
 		newUninstallCmd(),
+		newGenCompletionCmd(root),
 	)
 
 	return root
+}
+
+// --- _gen-completion (internal, called by installer) ---
+
+func newGenCompletionCmd(root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:    "_gen-completion",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return root.GenBashCompletionV2(os.Stdout, true)
+			case "zsh":
+				return root.GenZshCompletion(os.Stdout)
+			case "fish":
+				return root.GenFishCompletion(os.Stdout, true)
+			case "powershell":
+				return genPowerShellCompletion()
+			}
+			return fmt.Errorf("unknown shell: %s", args[0])
+		},
+	}
+}
+
+func genPowerShellCompletion() error {
+	name := buildinfo.AppName
+	varName := strings.ReplaceAll(strings.ReplaceAll(name, "-", "_"), ":", "_")
+
+	// Cobra's generated PS completion script is incompatible with Windows
+	// PowerShell 5.1. Generate a minimal script that calls __complete directly.
+	// %[3]s is the backtick character (cannot appear in Go raw strings).
+	script := fmt.Sprintf(`[scriptblock]$__%[2]sCompleterBlock = {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    $cmd = $commandAst.ToString()
+    if ($cmd.Length -gt $cursorPosition) { $cmd = $cmd.Substring(0, $cursorPosition) }
+    $null = $cmd -match '^(\S+)\s*(.*)?$'
+    $prog = $Matches[1]; $argPart = $Matches[2]
+    $req = "$prog __complete"
+    if ($argPart) { $req += " $argPart" }
+    if ($wordToComplete -eq '') {
+        if ($PSVersionTable.PSVersion -ge [version]'7.3.0' -and $PSNativeCommandArgumentPassing -ne 'Legacy') {
+            $req += ' ""'
+        } else {
+            $req += ' %[3]s"%[3]s"'
+        }
+    }
+    [array]$out = (Invoke-Expression $req) 2>$null
+    if (-not $out -or $out.Length -lt 2) { return }
+    for ($i = 0; $i -lt $out.Length - 1; $i++) {
+        $line = $out[$i]; if (-not $line) { continue }
+        $sep = $line.IndexOf([char]9)
+        if ($sep -ge 0) { $t = $line.Substring(0,$sep); $d = $line.Substring($sep+1) }
+        else            { $t = $line; $d = ' ' }
+        if (-not $d) { $d = ' ' }
+        if ($t) { [System.Management.Automation.CompletionResult]::new($t, $t, 'ParameterValue', $d) }
+    }
+}
+Register-ArgumentCompleter -Native -CommandName '%[1]s' -ScriptBlock $__%[2]sCompleterBlock
+Register-ArgumentCompleter -Native -CommandName '%[1]s.exe' -ScriptBlock $__%[2]sCompleterBlock
+`, name, varName, "`")
+
+	_, err := os.Stdout.WriteString(script)
+	return err
 }
 
 // --- SSH (root + explicit) ---

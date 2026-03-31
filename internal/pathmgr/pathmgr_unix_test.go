@@ -11,21 +11,21 @@ import (
 
 func TestMarkerBlockContainsCompletion(t *testing.T) {
 	block := markerBlock("/home/test/.local/share/kvm-ubuntu/bin", "zsh")
-	if !strings.Contains(block, "completion zsh") {
-		t.Errorf("zsh marker block missing completion line:\n%s", block)
+	if !strings.Contains(block, "source") || !strings.Contains(block, ".zsh") {
+		t.Errorf("zsh marker block missing completion source line:\n%s", block)
 	}
 	if !strings.Contains(block, "export PATH=") {
 		t.Errorf("marker block missing PATH export:\n%s", block)
 	}
 
 	block = markerBlock("/home/test/.local/share/kvm-ubuntu/bin", "bash")
-	if !strings.Contains(block, "completion bash") {
-		t.Errorf("bash marker block missing completion line:\n%s", block)
+	if !strings.Contains(block, "source") || !strings.Contains(block, ".bash") {
+		t.Errorf("bash marker block missing completion source line:\n%s", block)
 	}
 
 	block = markerBlock("/home/test/.local/share/kvm-ubuntu/bin", "")
-	if strings.Contains(block, "completion") {
-		t.Errorf("profile marker block should NOT contain completion:\n%s", block)
+	if strings.Contains(block, "source") {
+		t.Errorf("profile marker block should NOT contain source:\n%s", block)
 	}
 
 	t.Logf("zsh block:\n%s", markerBlock("/home/user/.local/share/kvm-ubuntu/bin", "zsh"))
@@ -54,8 +54,8 @@ func TestAddAndRemovePath(t *testing.T) {
 
 	data, _ := os.ReadFile(zshrc)
 	content := string(data)
-	if !strings.Contains(content, "completion zsh") {
-		t.Errorf(".zshrc missing zsh completion:\n%s", content)
+	if !strings.Contains(content, "source") || !strings.Contains(content, ".zsh") {
+		t.Errorf(".zshrc missing zsh completion source:\n%s", content)
 	}
 	if !strings.Contains(content, "export PATH=") {
 		t.Errorf(".zshrc missing PATH:\n%s", content)
@@ -63,8 +63,8 @@ func TestAddAndRemovePath(t *testing.T) {
 
 	data, _ = os.ReadFile(bashrc)
 	content = string(data)
-	if !strings.Contains(content, "completion bash") {
-		t.Errorf(".bashrc missing bash completion:\n%s", content)
+	if !strings.Contains(content, "source") || !strings.Contains(content, ".bash") {
+		t.Errorf(".bashrc missing bash completion source:\n%s", content)
 	}
 
 	// Idempotent: run again, should still work (rewrites block)
@@ -87,8 +87,8 @@ func TestAddAndRemovePath(t *testing.T) {
 
 	data, _ = os.ReadFile(zshrc)
 	content = string(data)
-	if strings.Contains(content, "completion") {
-		t.Errorf(".zshrc still contains completion after removal:\n%s", content)
+	if strings.Contains(content, "source") {
+		t.Errorf(".zshrc still contains source after removal:\n%s", content)
 	}
 	if strings.Contains(content, "export PATH=") {
 		t.Errorf(".zshrc still contains PATH after removal:\n%s", content)

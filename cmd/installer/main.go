@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,6 +20,23 @@ import (
 var staging embed.FS
 
 func main() {
+	pause := isDoubleClicked()
+	err := run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+	}
+	if pause {
+		fmt.Println()
+		fmt.Print("请按回车键退出...")
+		var b [1]byte
+		os.Stdin.Read(b[:])
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	fmt.Printf("%s installer v%s\n\n", buildinfo.AppName, buildinfo.Version)
 
 	dataRoot := paths.DataRoot()
@@ -29,22 +47,22 @@ func main() {
 	configPath := paths.ConfigEnvPath()
 	configExample := paths.ConfigEnvExamplePath()
 
-	steps := 4
+	compDir := paths.CompletionDir()
+
+	steps := 5
 	step := 0
 
-	// Step 1: Extract repo (scripts)
 	step++
 	fmt.Printf("[%d/%d] 释放脚本到 %s ...\n", step, steps, repoDir)
 	if err := extractDir("staging", repoDir, []string{"_cli"}); err != nil {
-		die("释放脚本失败: %v", err)
+		return fmt.Errorf("释放脚本失败: %v", err)
 	}
 	fmt.Println("  ✓ 完成")
 
-	// Step 2: Extract CLI binary
 	step++
 	fmt.Printf("[%d/%d] 释放 CLI 到 %s ...\n", step, steps, cliPath)
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		die("创建 bin 目录失败: %v", err)
+		return fmt.Errorf("创建 bin 目录失败: %v", err)
 	}
 	cliBinName := buildinfo.AppName
 	if runtime.GOOS == "windows" {
@@ -52,18 +70,25 @@ func main() {
 	}
 	cliData, err := staging.ReadFile("staging/_cli/" + cliBinName)
 	if err != nil {
-		die("读取 CLI 二进制失败: %v", err)
+		return fmt.Errorf("读取 CLI 二进制失败: %v", err)
 	}
 	perm := os.FileMode(0o755)
 	if runtime.GOOS == "windows" {
 		perm = 0o644
 	}
 	if err := os.WriteFile(cliPath, cliData, perm); err != nil {
-		die("写入 CLI 失败: %v", err)
+		return fmt.Errorf("写入 CLI 失败: %v", err)
 	}
 	fmt.Println("  ✓ 完成")
 
-	// Step 3: PATH
+	step++
+	fmt.Printf("[%d/%d] 生成 shell 补全脚本 ...\n", step, steps)
+	if err := generateCompletions(cliPath, compDir); err != nil {
+		fmt.Printf("  ⚠ 补全脚本生成部分失败: %v\n", err)
+	} else {
+		fmt.Println("  ✓ 完成")
+	}
+
 	step++
 	fmt.Printf("[%d/%d] 配置 PATH ...\n", step, steps)
 	modified, err := pathmgr.AddToPath(binDir)
@@ -76,7 +101,6 @@ func main() {
 		fmt.Println("  ✓ PATH 已包含，无需修改")
 	}
 
-	// Step 4: config.env + meta
 	step++
 	fmt.Printf("[%d/%d] 写入元数据 ...\n", step, steps)
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -94,7 +118,7 @@ func main() {
 		PathEntries:   modified,
 	}
 	if err := m.Save(metaPath); err != nil {
-		die("写入 meta 失败: %v", err)
+		return fmt.Errorf("写入 meta 失败: %v", err)
 	}
 	fmt.Println("  ✓ 完成")
 
@@ -105,12 +129,7 @@ func main() {
 	fmt.Println()
 
 	printRestartHint(modified)
-
-	if isDoubleClicked() {
-		fmt.Print("请按回车键退出...")
-		var b [1]byte
-		os.Stdin.Read(b[:])
-	}
+	return nil
 }
 
 func extractDir(srcRoot, dstRoot string, skip []string) error {
@@ -157,6 +176,44 @@ func extractDir(srcRoot, dstRoot string, skip []string) error {
 	})
 }
 
+func generateCompletions(cliPath, compDir string) error {
+	if err := os.MkdirAll(compDir, 0o755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+
+	type shellDef struct {
+		arg string // argument passed to _gen-completion
+		ext string // file extension for CompletionFilePath
+	}
+	shells := []shellDef{
+		{"bash", "bash"},
+		{"zsh", "zsh"},
+	}
+	if runtime.GOOS == "windows" {
+		shells = []shellDef{
+			{"powershell", "ps1"},
+		}
+	}
+
+	var firstErr error
+	for _, s := range shells {
+		out, err := exec.Command(cliPath, "_gen-completion", s.arg).Output()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", s.arg, err)
+			}
+			continue
+		}
+		dst := paths.CompletionFilePath(s.ext)
+		if err := os.WriteFile(dst, out, 0o644); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("写入 %s 失败: %w", dst, err)
+			}
+		}
+	}
+	return firstErr
+}
+
 func printRestartHint(modified []string) {
 	if runtime.GOOS == "windows" {
 		fmt.Println("⚡ 请重新打开 命令行/PowerShell 窗口以使 PATH 生效。")
@@ -171,20 +228,3 @@ func printRestartHint(modified []string) {
 	}
 }
 
-func isDoubleClicked() bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	// On Windows, check if parent process count suggests double-click
-	// A simple heuristic: if stdin is not a terminal pipe
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0 && os.Getenv("PROMPT") == "" && os.Getenv("PSModulePath") == ""
-}
-
-func die(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "错误: "+format+"\n", args...)
-	os.Exit(1)
-}
