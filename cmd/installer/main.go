@@ -168,6 +168,13 @@ func extractDir(srcRoot, dstRoot string, skip []string) error {
 			return readErr
 		}
 
+		// PowerShell 5.1 reads files using system default encoding (GBK on
+		// Chinese Windows). Prepend UTF-8 BOM so PS correctly decodes non-ASCII.
+		if (strings.HasSuffix(path, ".ps1") || strings.HasSuffix(path, ".psm1")) &&
+			!hasBOM(data) {
+			data = append([]byte{0xEF, 0xBB, 0xBF}, data...)
+		}
+
 		perm := os.FileMode(0o644)
 		if strings.HasSuffix(path, ".sh") {
 			perm = 0o755
@@ -226,5 +233,9 @@ func printRestartHint(modified []string) {
 	for _, f := range modified {
 		fmt.Printf("    source %s\n", f)
 	}
+}
+
+func hasBOM(data []byte) bool {
+	return len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF
 }
 
