@@ -11,21 +11,20 @@
 #   - 格式：NN-name.sh（NN 为两位数字，控制执行顺序）
 #   - 建议：10-29 基础设施，30-49 开发工具，50-69 业务应用，70+ 自定义
 #
+# 跳过与重跑机制（由 provision 统一管理，脚本无需处理）：
+#   - provision 在执行前会计算脚本的 SHA-256 哈希
+#   - 与 VM 上 /opt/kvm-extensions/<name>.done 中存储的哈希比较
+#   - 哈希一致 → 自动跳过，不执行脚本
+#   - 哈希不同或 .done 不存在 → 执行脚本，成功后写入新哈希
+#   - 因此：修改脚本内容后再次 provision 会自动重跑
+#
 # 注意事项：
 #   - 脚本以 root 权限运行
-#   - 必须保证幂等（多次运行结果一致，无副作用）
-#   - 标记文件是幂等的基础层，也可在脚本内部做更细粒度的检查
+#   - 脚本变更后会自动重跑，开发者须自行保证幂等性
+#   - 可在脚本内部做细粒度的幂等检查（如 command -v / dpkg -l 等）
 set -euo pipefail
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
-MARKER_DIR="/opt/kvm-extensions"
-MARKER="${MARKER_DIR}/${EXTENSION_NAME}.done"
-
-# 幂等检查：已安装则跳过
-if [[ -f "$MARKER" ]]; then
-    echo "[${EXTENSION_NAME}] 已安装，跳过"
-    exit 0
-fi
 
 echo "[${EXTENSION_NAME}] 开始安装..."
 
@@ -45,7 +44,4 @@ echo "[${EXTENSION_NAME}] 开始安装..."
 
 echo "[${EXTENSION_NAME}] 此为示例扩展，无实际安装操作"
 
-# 标记完成
-mkdir -p "$MARKER_DIR"
-date -Iseconds > "$MARKER"
 echo "[${EXTENSION_NAME}] 安装完成"

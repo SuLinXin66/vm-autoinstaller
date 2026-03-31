@@ -4,14 +4,6 @@
 set -euo pipefail
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
-MARKER_DIR="/opt/kvm-extensions"
-# 使用新标记名，使已装 bash 版的 VM 会重新执行本脚本
-MARKER="${MARKER_DIR}/${EXTENSION_NAME}-go.done"
-
-if [[ -f "$MARKER" ]]; then
-    echo "[${EXTENSION_NAME}] 已安装（Go 版），跳过"
-    exit 0
-fi
 
 VM_USER="${VM_USER:-wpsweb}"
 USER_HOME="$(eval echo "~${VM_USER}")"
@@ -64,9 +56,6 @@ if [[ -f "${ASDF_DATA}/asdf.sh" ]]; then
     rm -rf "${ASDF_DATA}/.git" "${ASDF_DATA}/bin" "${ASDF_DATA}/lib" "${ASDF_DATA}/test" "${ASDF_DATA}/docs" 2>/dev/null || true
     rm -f "${ASDF_DATA}/asdf.sh" "${ASDF_DATA}/Makefile" 2>/dev/null || true
 fi
-# 旧扩展留下的完成标记，避免误以为仍「已装 bash 版」
-rm -f "${MARKER_DIR}/${EXTENSION_NAME}.done" 2>/dev/null || true
-
 echo "[3/4] 生成 zsh 补全 _asdf ..."
 sudo -u "$VM_USER" mkdir -p "${ASDF_DATA}/completions"
 if ! sudo -u "$VM_USER" env HOME="$USER_HOME" PATH="${LOCAL_BIN}:${PATH}" ASDF_DATA_DIR="$ASDF_DATA" \
@@ -82,6 +71,4 @@ echo "  asdf: ${VER_OUT}"
 sudo -u "$VM_USER" env HOME="$USER_HOME" PATH="${LOCAL_BIN}:${PATH}" ASDF_DATA_DIR="$ASDF_DATA" \
     bash -c 'command asdf reshim' 2>/dev/null || true
 
-mkdir -p "$MARKER_DIR"
-date -Iseconds > "$MARKER"
 echo "[${EXTENSION_NAME}] 安装完成（请重新登录或 exec zsh；若补全仍无刷新可 rm ~/.zcompdump*）"

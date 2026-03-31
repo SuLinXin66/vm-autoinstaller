@@ -20,6 +20,7 @@ $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 $extDir = Join-Path $VMDir 'extensions'
 $remoteDir = '/opt/kvm-extensions/scripts'
+$markerDir = '/opt/kvm-extensions'
 
 Install-VirtualBox
 
@@ -85,9 +86,25 @@ Write-LogOk "传输完成 ($($scripts.Count) 个脚本)"
 
 $ok = 0
 $fail = 0
+$skip = 0
+$failNames = @()
 foreach ($f in $scripts) {
     $baseName = $f.Name
     $short = [System.IO.Path]::GetFileNameWithoutExtension($baseName)
+
+    $localHash = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLower()
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $storedHash = (& $sshExe @baseArgs "${vmUser}@${vmHost}" "cat '$markerDir/$short.done' 2>/dev/null" 2>&1) -join ''
+    $ErrorActionPreference = $prevEAP
+    $storedHash = $storedHash.Trim()
+
+    if ($localHash -eq $storedHash) {
+        Write-LogInfo "扩展 [$short] 未变更，跳过"
+        $skip++
+        continue
+    }
+
     Write-LogInfo "执行扩展: $short..."
     $runCmd = "sudo bash $remoteDir/$baseName"
     $prevEAP = $ErrorActionPreference
@@ -95,16 +112,28 @@ foreach ($f in $scripts) {
     & $sshExe @baseArgs "${vmUser}@${vmHost}" $runCmd 2>&1 | ForEach-Object { Write-Host $_ }
     $ErrorActionPreference = $prevEAP
     if ($LASTEXITCODE -eq 0) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'SilentlyContinue'
+        $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "echo '$localHash' | sudo tee '$markerDir/$short.done' > /dev/null" 2>&1
+        $ErrorActionPreference = $prevEAP
         $ok++
     }
     else {
         Write-LogWarn "扩展 [$short] 执行失败，继续下一个..."
         $fail++
+        $failNames += $short
     }
 }
 
 Write-LogBanner -Title '扩展执行完成'
-Write-LogInfo "成功: $ok, 失败: $fail, 合计: $($scripts.Count)"
+if ($skip -eq $scripts.Count) {
+    Write-LogOk '全部扩展未变更，无需执行'
+} elseif ($fail -eq 0) {
+    Write-LogOk "全部成功: $ok/$($scripts.Count) (跳过: $skip)"
+} else {
+    Write-LogWarn "成功: $ok, 失败: $fail, 跳过: $skip, 合计: $($scripts.Count)"
+    Write-LogWarn "失败的扩展: $($failNames -join ', ')"
+}
 
 # ── 同步项目内置配置到 VM ──────────────────────────────────
 $dotfilesDir = Join-Path $VMDir 'config\dotfiles'

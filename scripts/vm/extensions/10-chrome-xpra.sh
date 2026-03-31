@@ -4,14 +4,6 @@
 set -euo pipefail
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
-MARKER_DIR="/opt/kvm-extensions"
-MARKER="${MARKER_DIR}/${EXTENSION_NAME}.done"
-
-# 幂等检查：已安装则跳过
-if [[ -f "$MARKER" ]]; then
-    echo "[${EXTENSION_NAME}] 已安装，跳过"
-    exit 0
-fi
 
 echo "[${EXTENSION_NAME}] 开始安装 Chrome + Xpra..."
 
@@ -46,7 +38,4 @@ echo "[5/5] 验证安装..."
 google-chrome-stable --version
 xpra --version
 
-# 标记完成
-mkdir -p "$MARKER_DIR"
-date -Iseconds > "$MARKER"
 echo "[${EXTENSION_NAME}] 安装完成"

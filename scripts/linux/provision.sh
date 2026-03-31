@@ -23,6 +23,7 @@ SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
 
 EXTENSIONS_DIR="${REPO_ROOT}/vm/extensions"
 REMOTE_DIR="/opt/kvm-extensions/scripts"
+MARKER_DIR="/opt/kvm-extensions"
 
 # SSH 连接参数
 _provision::ssh_opts() {
@@ -88,16 +89,29 @@ for ext in "${extensions[@]}"; do
 done
 log::ok "传输完成 (${#extensions[@]} 个脚本)"
 
-# 按序执行每个扩展
+# 按序执行每个扩展（hash-based 跳过机制）
 succeeded=0
 failed=0
+skipped=0
 failed_names=()
 
 for ext in "${extensions[@]}"; do
     name="$(basename "$ext" .sh)"
+
+    local_hash="$(sha256sum "$ext" | awk '{print $1}')"
+    stored_hash="$(_provision::ssh_exec "$ip" "cat '${MARKER_DIR}/${name}.done' 2>/dev/null" 2>/dev/null || true)"
+    stored_hash="$(echo "$stored_hash" | tr -d '[:space:]')"
+
+    if [[ "$local_hash" == "$stored_hash" ]]; then
+        log::info "扩展 [${name}] 未变更，跳过"
+        (( ++skipped )) || true
+        continue
+    fi
+
     log::info "执行扩展: ${name}..."
 
     if _provision::ssh_exec "$ip" "sudo bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
+        echo "${local_hash}" | _provision::ssh_exec "$ip" "sudo tee '${MARKER_DIR}/${name}.done' > /dev/null"
         (( ++succeeded )) || true
     else
         log::warn "扩展 [${name}] 执行失败，继续下一个..."
@@ -107,10 +121,12 @@ for ext in "${extensions[@]}"; do
 done
 
 log::banner "扩展执行完成"
-if (( failed == 0 )); then
-    log::ok "全部成功: ${succeeded}/${#extensions[@]}"
+if (( skipped == ${#extensions[@]} )); then
+    log::ok "全部扩展未变更，无需执行"
+elif (( failed == 0 )); then
+    log::ok "全部成功: ${succeeded}/${#extensions[@]} (跳过: ${skipped})"
 else
-    log::warn "成功: ${succeeded}, 失败: ${failed}, 合计: ${#extensions[@]}"
+    log::warn "成功: ${succeeded}, 失败: ${failed}, 跳过: ${skipped}, 合计: ${#extensions[@]}"
     log::warn "失败的扩展: ${failed_names[*]}"
 fi
 

@@ -5,13 +5,6 @@
 set -euo pipefail
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
-MARKER_DIR="/opt/kvm-extensions"
-MARKER="${MARKER_DIR}/${EXTENSION_NAME}.done"
-
-if [[ -f "$MARKER" ]]; then
-    echo "[${EXTENSION_NAME}] 已安装，跳过"
-    exit 0
-fi
 
 VM_USER="${VM_USER:-wpsweb}"
 USER_HOME="$(eval echo "~${VM_USER}")"
@@ -167,6 +160,4 @@ echo "  gcc:          $(gcc --version 2>/dev/null | head -1 || echo '未安装')
 echo "  oh-my-zsh:    $(test -d "$OMZ_DIR" && echo '已安装' || echo '未安装')"
 echo "  oh-my-posh:   $(sudo -u "$VM_USER" bash -c "export HOME='${USER_HOME}' PATH='${USER_HOME}/.local/bin:\$PATH'; oh-my-posh --version 2>/dev/null" || echo '未安装')"
 
-mkdir -p "$MARKER_DIR"
-date -Iseconds > "$MARKER"
 echo "[${EXTENSION_NAME}] 安装完成"
