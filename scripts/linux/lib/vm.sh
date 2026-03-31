@@ -288,7 +288,10 @@ vm::start() {
         log::ok "VM [${name}] 已在运行"
     else
         log::info "启动 VM [${name}]..."
-        _vm::virsh start "$name"
+        if ! _vm::virsh start "$name"; then
+            log::error "启动 VM [${name}] 失败"
+            return 1
+        fi
         log::ok "VM [${name}] 已启动"
     fi
 

@@ -17,10 +17,7 @@ source "${REPO_ROOT}/vm/config.env"
 
 VM_NAME="${VM_NAME:-ubuntu-server}"
 
-sudo::ensure
-
 if vm::exists "$VM_NAME"; then
-    log::info "检测到 VM [${VM_NAME}] 已安装，直接启动..."
     exec "${PROJECT_ROOT}/start.sh" "$@"
 else
     log::info "VM [${VM_NAME}] 尚未安装，开始完整安装流程..."

@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-# 启动已存在的 VM，并增量执行扩展
+# 启动已存在的 VM（静默快速启动，日常使用）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
 $VMDir = Join-Path $RepoRoot 'vm'
@@ -28,41 +28,18 @@ if (Test-Path -LiteralPath $sshKeyPath) {
 
 Install-VirtualBox
 
-if (-not (Test-VMRunning -Name $vmName)) {
-    Write-LogInfo "启动 VM [$vmName]..."
-    Start-VM -Name $vmName
-}
-else {
+if (Test-VMRunning -Name $vmName) {
     Write-LogOk "VM [$vmName] 已在运行"
+    exit 0
 }
+
+Write-LogInfo "启动 VM [$vmName]..."
+Start-VM -Name $vmName
 
 try {
     $vmIp = Wait-VMReady -Name $vmName -User $vmUser
+    Write-LogOk "VM [$vmName] 已就绪 (${vmUser}@${vmIp})"
 }
 catch {
-    Write-LogWarn 'VM 启动过程中出现问题'
-    Write-LogInfo "可手动检查: $env:APP_NAME status"
-    exit 1
+    Write-LogWarn "VM 已启动，但 SSH 尚未就绪。可稍后重试: $env:APP_NAME ssh"
 }
-
-$provisionScript = Join-Path $_ScriptDir 'provision.ps1'
-try {
-    & $provisionScript
-}
-catch {
-    Write-LogWarn "部分扩展模块执行失败，可稍后运行 $env:APP_NAME provision 重试"
-}
-
-Write-LogBanner -Title 'VM 已就绪'
-Write-Host ''
-Write-Host '  连接信息：'
-Write-Host ''
-Write-Host "    SSH:     ssh -i $sshKeyPath ${vmUser}@${vmIp}"
-Write-Host "    密钥:    $sshKeyPath"
-Write-Host ''
-Write-Host '  快捷命令：'
-Write-Host "    $env:APP_NAME ssh           SSH 连入 VM"
-Write-Host "    $env:APP_NAME chrome        启动 Chrome 浏览器"
-Write-Host "    $env:APP_NAME status        查看 VM 状态"
-Write-Host "    $env:APP_NAME destroy       销毁 VM"
-Write-Host ''

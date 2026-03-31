@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 启动已存在的 VM 并显示连接信息
+# 启动已存在的 VM（静默快速启动，日常使用）
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
@@ -22,31 +22,48 @@ if ! vm::exists "$VM_NAME"; then
     log::die "VM [${VM_NAME}] 不存在，请先运行 ${APP_NAME} setup"
 fi
 
-# 设置 SSH 密钥（用于 vm::start 中的 SSH 测试）
-if [[ -f "$SSH_KEY_PATH" ]]; then
-    vm::set_ssh_key "$SSH_KEY_PATH"
+[[ -f "$SSH_KEY_PATH" ]] && vm::set_ssh_key "$SSH_KEY_PATH"
+
+# Already running — just report and exit
+if vm::is_running "$VM_NAME"; then
+    ip="$(vm::get_ip "$VM_NAME" 2>/dev/null)" || ip=""
+    if [[ -n "$ip" ]]; then
+        log::ok "VM [${VM_NAME}] 已在运行 (${VM_USER}@${ip})"
+    else
+        log::ok "VM [${VM_NAME}] 已在运行"
+    fi
+    exit 0
 fi
 
-sudo::ensure
+log::info "启动 VM [${VM_NAME}]..."
 
-if vm_ip="$(vm::start "$VM_NAME" "$VM_USER")"; then
-    # VM 就绪后执行扩展模块增量检查（已安装的秒级跳过，新增的自动执行）
-    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ${APP_NAME} provision 重试"
-
-    log::banner "VM 已就绪"
-    echo ""
-    echo "  连接信息："
-    echo ""
-    echo "    SSH:     ssh -i ${SSH_KEY_PATH} ${VM_USER}@${vm_ip}"
-    echo "    密钥:    ${SSH_KEY_PATH}"
-    echo ""
-    echo "  快捷命令："
-    echo "    ${APP_NAME} ssh           SSH 连入 VM"
-    echo "    ${APP_NAME} chrome        启动 Chrome 浏览器"
-    echo "    ${APP_NAME} status        查看 VM 状态"
-    echo "    ${APP_NAME} destroy       销毁 VM"
-    echo ""
-else
-    log::warn "VM 启动过程中出现问题"
-    log::info "可手动检查: ${APP_NAME} status"
+if ! _vm::virsh start "$VM_NAME" &>/dev/null; then
+    log::error "启动 VM [${VM_NAME}] 失败"
+    exit 1
 fi
+
+# Wait for IP
+ip=""
+for (( i=0; i<20; i++ )); do
+    sleep 3
+    ip="$(vm::get_ip "$VM_NAME" 2>/dev/null)" || true
+    [[ -n "$ip" ]] && break
+done
+
+if [[ -z "$ip" ]]; then
+    log::ok "VM [${VM_NAME}] 已启动"
+    log::warn "未获取到 IP，可稍后检查: ${APP_NAME} status"
+    exit 0
+fi
+
+# Wait for SSH
+for (( i=0; i<20; i++ )); do
+    if _vm::_ssh_test "$VM_USER" "$ip"; then
+        log::ok "VM [${VM_NAME}] 已就绪 (${VM_USER}@${ip})"
+        exit 0
+    fi
+    sleep 3
+done
+
+log::ok "VM [${VM_NAME}] 已启动 (${VM_USER}@${ip})"
+log::warn "SSH 尚未就绪，可稍后重试: ${APP_NAME} ssh"

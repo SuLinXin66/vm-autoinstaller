@@ -102,6 +102,7 @@ func ReadEnv(path string) (map[string]string, error) {
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
 		val = parseValue(val)
+		val = os.ExpandEnv(val)
 		result[key] = val
 	}
 	return result, scanner.Err()

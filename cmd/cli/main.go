@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gookit/color"
+	gotable "github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
@@ -18,7 +20,6 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/runner"
-	"github.com/SuLinXin66/vm-autoinstaller/internal/table"
 )
 
 func main() {
@@ -53,6 +54,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newSetupCmd(),
 		newStopCmd(),
+		newRestartCmd(),
 		newStatusCmd(),
 		newDestroyCmd(),
 		newProvisionCmd(),
@@ -62,6 +64,7 @@ func newRootCmd() *cobra.Command {
 		newCpCmd(),
 		newConfigCmd(),
 		newInfoCmd(),
+		newShareCmd(),
 		newSyncCmd(),
 		newUpgradeCmd(),
 		newUninstallCmd(),
@@ -169,6 +172,7 @@ func newSetupCmd() *cobra.Command {
 				return err
 			}
 			saveConfigSnapshot()
+			remountShares()
 			return nil
 		},
 	}
@@ -182,6 +186,18 @@ func newStopCmd() *cobra.Command {
 		Short: "停止 VM",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runner.RunScript("stop", args...)
+		},
+	}
+}
+
+// --- restart ---
+
+func newRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "重启 VM（stop + start）",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return restartVM()
 		},
 	}
 }
@@ -269,7 +285,12 @@ func newExecCmd() *cobra.Command {
 				"-p", sshPort,
 			}
 			if _, err := os.Stat(keyPath); err == nil {
-				sshArgs = append(sshArgs, "-i", keyPath)
+				if f, e := os.Open(keyPath); e == nil {
+					f.Close()
+					sshArgs = append(sshArgs, "-i", keyPath)
+				} else {
+					return fmt.Errorf("SSH 密钥 %s 无法读取（属于 root），请执行: sudo chown $USER %s", keyPath, keyPath)
+				}
 			}
 			sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", user, sshHost))
 			sshArgs = append(sshArgs, args...)
@@ -315,7 +336,12 @@ vm: 前缀表示 VM 内路径。`, buildinfo.AppName, buildinfo.AppName),
 				"-P", sshPort,
 			}
 			if _, err := os.Stat(keyPath); err == nil {
-				scpArgs = append(scpArgs, "-i", keyPath)
+				if f, e := os.Open(keyPath); e == nil {
+					f.Close()
+					scpArgs = append(scpArgs, "-i", keyPath)
+				} else {
+					return fmt.Errorf("SSH 密钥 %s 无法读取（属于 root），请执行: sudo chown $USER %s", keyPath, keyPath)
+				}
 			}
 
 			for _, a := range args {
@@ -387,6 +413,19 @@ func newConfigCmd() *cobra.Command {
 	return cmd
 }
 
+func newTable(headers ...string) gotable.Writer {
+	tw := gotable.NewWriter()
+	tw.SetOutputMirror(nil)
+	row := make(gotable.Row, len(headers))
+	for i, h := range headers {
+		row[i] = h
+	}
+	tw.AppendHeader(row)
+	tw.SetStyle(gotable.StyleLight)
+	tw.Style().Options.SeparateRows = false
+	return tw
+}
+
 func showConfig() error {
 	cfgPath := paths.ConfigEnvPath()
 	env, err := config.ReadEnv(cfgPath)
@@ -397,7 +436,7 @@ func showConfig() error {
 	pending := config.PendingChanges(cfgPath, paths.ConfigSnapshotPath())
 	hasPending := len(pending) > 0
 
-	t := table.New("键", "当前值", "状态", "说明", "备注")
+	tw := newTable("键", "当前值", "状态", "说明", "备注")
 
 	allKeys := make(map[string]bool)
 	for k := range config.KnownKeys {
@@ -414,7 +453,7 @@ func showConfig() error {
 		m, known := config.KnownKeys[key]
 		desc := ""
 		remark := ""
-		status := table.Colorize(table.Green, "✓ 已生效")
+		status := color.Green.Sprint("✓ 已生效")
 
 		if known {
 			desc = m.Description
@@ -427,8 +466,8 @@ func showConfig() error {
 		}
 
 		if oldVal, isPending := pending[key]; isPending {
-			status = table.Colorize(table.BrightRed, "⚠ 待生效")
-			val = table.Colorize(table.BrightRed, val)
+			status = color.LightRed.Sprint("⚠ 待生效")
+			val = color.LightRed.Sprint(val)
 			if oldVal != "" {
 				remark = "生效值: " + oldVal
 			} else {
@@ -439,14 +478,14 @@ func showConfig() error {
 			}
 		}
 
-		t.AddRow(key, val, status, desc, remark)
+		tw.AppendRow(gotable.Row{key, val, status, desc, remark})
 	}
 
-	fmt.Print(t.Render())
+	fmt.Println(tw.Render())
 
 	if hasPending {
 		fmt.Println()
-		fmt.Println(table.Colorize(table.BrightRed, "⚠ 有配置已修改但未生效，请执行以下命令使其生效:"))
+		fmt.Println(color.LightRed.Sprint("⚠ 有配置已修改但未生效，请执行以下命令使其生效:"))
 		needRestart := false
 		needRebuild := false
 		for k := range pending {
@@ -513,12 +552,12 @@ func showPending() error {
 		return nil
 	}
 	if len(pending) == 0 {
-		fmt.Println(table.Colorize(table.Green, "✓ 所有配置均已生效，无待生效变更。"))
+		fmt.Println(color.Green.Sprint("✓ 所有配置均已生效，无待生效变更。"))
 		return nil
 	}
 
 	current, _ := config.ReadEnv(cfgPath)
-	t := table.New("键", "当前值(未生效)", "生效中的值", "所需操作")
+	tw := newTable("键", "当前值(未生效)", "生效中的值", "所需操作")
 	for _, k := range config.SortedKeys(pending) {
 		cur := current[k]
 		old := pending[k]
@@ -526,13 +565,9 @@ func showPending() error {
 		if m, ok := config.KnownKeys[k]; ok && m.EffectLevel != config.LevelNone {
 			action = m.EffectLevel.String()
 		}
-		t.AddRow(k,
-			table.Colorize(table.BrightRed, cur),
-			old,
-			action,
-		)
+		tw.AppendRow(gotable.Row{k, color.LightRed.Sprint(cur), old, action})
 	}
-	fmt.Print(t.Render())
+	fmt.Println(tw.Render())
 	return nil
 }
 
@@ -549,17 +584,17 @@ func newInfoCmd() *cobra.Command {
 }
 
 func showInfo() error {
-	t := table.New("项目", "值")
-	t.AddRow("应用名称", buildinfo.AppName)
-	t.AddRow("CLI 版本", buildinfo.Version)
-	t.AddRow("仓库地址", buildinfo.RepoURL)
-	t.AddRow("分支", buildinfo.Branch)
-	t.AddRow("数据目录", paths.DataRoot())
-	t.AddRow("脚本目录", paths.ScriptDir())
+	tw := newTable("项目", "值")
+	tw.AppendRow(gotable.Row{"应用名称", buildinfo.AppName})
+	tw.AppendRow(gotable.Row{"CLI 版本", buildinfo.Version})
+	tw.AppendRow(gotable.Row{"仓库地址", buildinfo.RepoURL})
+	tw.AppendRow(gotable.Row{"分支", buildinfo.Branch})
+	tw.AppendRow(gotable.Row{"数据目录", paths.DataRoot()})
+	tw.AppendRow(gotable.Row{"脚本目录", paths.ScriptDir()})
 
 	metaPath := paths.MetaPath()
 	if m, err := meta.Load(metaPath); err == nil {
-		t.AddRow("Bundle 版本", m.BundleVersion)
+		tw.AppendRow(gotable.Row{"Bundle 版本", m.BundleVersion})
 	}
 
 	cfgPath := paths.ConfigEnvPath()
@@ -567,17 +602,21 @@ func showInfo() error {
 	if cfgErr == nil {
 		vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
 		dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
-		t.AddRow("VM 名称", vmName)
-		t.AddRow("VM 数据目录", dataDir)
+		tw.AppendRow(gotable.Row{"VM 名称", vmName})
+		tw.AppendRow(gotable.Row{"VM 数据目录", dataDir})
 
 		if runtime.GOOS == "windows" {
-			addVBoxInfo(t, vmName)
+			addVBoxInfo(tw, vmName)
 		} else {
-			addKVMInfo(t, vmName)
+			addKVMInfo(tw, vmName)
 		}
 	}
 
-	fmt.Print(t.Render())
+	fmt.Println(tw.Render())
+
+	if cfgErr == nil {
+		showShareSummary()
+	}
 	return nil
 }
 
@@ -599,6 +638,10 @@ func runVirsh(args ...string) (string, error) {
 	if err == nil {
 		return string(out), nil
 	}
+	msg := strings.TrimSpace(string(out))
+	if msg != "" {
+		return "", fmt.Errorf("%s", msg)
+	}
 	return "", err
 }
 
@@ -618,10 +661,10 @@ func formatMem(kib int64) string {
 	return fmt.Sprintf("%d MB", mb)
 }
 
-func addKVMInfo(t *table.Table, vmName string) {
+func addKVMInfo(tw gotable.Writer, vmName string) {
 	out, err := runVirsh("dominfo", vmName)
 	if err != nil {
-		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未创建"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.LightRed.Sprint("未创建")})
 		return
 	}
 
@@ -630,30 +673,30 @@ func addKVMInfo(t *table.Table, vmName string) {
 
 	switch state {
 	case "running":
-		t.AddRow("VM 状态", table.Colorize(table.Green, "运行中"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.Green.Sprint("运行中")})
 	case "shut off":
-		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已关机"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.Yellow.Sprint("已关机")})
 		return
 	case "paused":
-		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已暂停"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.Yellow.Sprint("已暂停")})
 		return
 	case "":
-		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未知"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.LightRed.Sprint("未知")})
 		return
 	default:
-		t.AddRow("VM 状态", state)
+		tw.AppendRow(gotable.Row{"VM 状态", state})
 		return
 	}
 
 	if ip := getVirshIP(vmName); ip != "" {
-		t.AddRow("VM IP", ip)
+		tw.AppendRow(gotable.Row{"VM IP", ip})
 	}
 
 	if cpus := info["CPU(s)"]; cpus != "" {
-		t.AddRow("VM CPU", cpus+" 核")
+		tw.AppendRow(gotable.Row{"VM CPU", cpus + " 核"})
 	}
 	if cpuTime := info["CPU time"]; cpuTime != "" {
-		t.AddRow("VM CPU 时间", cpuTime)
+		tw.AppendRow(gotable.Row{"VM CPU 时间", cpuTime})
 	}
 
 	maxMem := parseKiB(info["Max memory"])
@@ -667,7 +710,7 @@ func addKVMInfo(t *table.Table, vmName string) {
 	if rss > 0 {
 		memStr += fmt.Sprintf("  (宿主机 RSS: %s)", formatMem(rss))
 	}
-	t.AddRow("VM 内存", memStr)
+	tw.AppendRow(gotable.Row{"VM 内存", memStr})
 }
 
 func parseVirshKV(out string) map[string]string {
@@ -728,10 +771,10 @@ func getVirshRSS(vmName string) int64 {
 	return 0
 }
 
-func addVBoxInfo(t *table.Table, vmName string) {
+func addVBoxInfo(tw gotable.Writer, vmName string) {
 	out, err := exec.Command("VBoxManage", "showvminfo", vmName, "--machinereadable").CombinedOutput()
 	if err != nil {
-		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未创建"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.LightRed.Sprint("未创建")})
 		return
 	}
 
@@ -745,20 +788,20 @@ func addVBoxInfo(t *table.Table, vmName string) {
 
 	switch info["VMState"] {
 	case "running":
-		t.AddRow("VM 状态", table.Colorize(table.Green, "运行中"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.Green.Sprint("运行中")})
 	case "poweroff":
-		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已关机"))
+		tw.AppendRow(gotable.Row{"VM 状态", color.Yellow.Sprint("已关机")})
 		return
 	default:
-		t.AddRow("VM 状态", info["VMState"])
+		tw.AppendRow(gotable.Row{"VM 状态", info["VMState"]})
 		return
 	}
 
 	if cpus := info["cpus"]; cpus != "" {
-		t.AddRow("VM CPU", cpus+" 核")
+		tw.AppendRow(gotable.Row{"VM CPU", cpus + " 核"})
 	}
 	if mem := info["memory"]; mem != "" {
-		t.AddRow("VM 内存", mem+" MB")
+		tw.AppendRow(gotable.Row{"VM 内存", mem + " MB"})
 	}
 }
 

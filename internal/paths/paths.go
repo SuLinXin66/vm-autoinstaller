@@ -66,6 +66,10 @@ func CompletionFilePath(shell string) string {
 	return filepath.Join(CompletionDir(), buildinfo.AppName+"."+shell)
 }
 
+func SharesPath() string {
+	return filepath.Join(DataRoot(), "shares.json")
+}
+
 func ScriptDir() string {
 	switch runtime.GOOS {
 	case "windows":

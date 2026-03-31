@@ -1,7 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 智能入口：VM 已存在则启动，否则完整安装
-# PS 5.1 某些调用方式下 $PSScriptRoot 可能为空，需回退到 $MyInvocation
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
 $VMDir = Join-Path $RepoRoot 'vm'
@@ -19,7 +18,6 @@ $vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
 Install-VirtualBox
 
 if (Test-VMExists -Name $vmName) {
-    Write-LogInfo "检测到 VM [$vmName] 已安装，直接启动..."
     $start = Join-Path $_ScriptDir 'start.ps1'
     & $start @args
 }

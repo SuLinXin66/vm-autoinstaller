@@ -22,15 +22,13 @@ if (-not (Test-ConfigExists)) {
 $cfg = Read-ProjectConfig
 $vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
 
-Write-LogBanner -Title "停止 VM: $vmName"
-
 if (-not (Test-VMExists -Name $vmName)) {
     Write-LogInfo "VM [$vmName] 不存在"
     exit 0
 }
 
 if (-not (Test-VMRunning -Name $vmName)) {
-    Write-LogInfo "VM [$vmName] 未在运行"
+    Write-LogOk "VM [$vmName] 未在运行"
     exit 0
 }
 
