@@ -19,7 +19,7 @@ DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
 
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./install.sh 或 ./setup.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ${APP_NAME} setup"
 fi
 
 # 设置 SSH 密钥（用于 vm::start 中的 SSH 测试）
@@ -31,7 +31,7 @@ sudo::ensure
 
 if vm_ip="$(vm::start "$VM_NAME" "$VM_USER")"; then
     # VM 就绪后执行扩展模块增量检查（已安装的秒级跳过，新增的自动执行）
-    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ./provision.sh 重试"
+    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ${APP_NAME} provision 重试"
 
     log::banner "VM 已就绪"
     echo ""
@@ -41,12 +41,12 @@ if vm_ip="$(vm::start "$VM_NAME" "$VM_USER")"; then
     echo "    密钥:    ${SSH_KEY_PATH}"
     echo ""
     echo "  快捷命令："
-    echo "    ./ssh.sh           SSH 连入 VM"
-    echo "    ./chrome.sh        启动 Chrome 浏览器"
-    echo "    ./status.sh        查看 VM 状态"
-    echo "    ./destroy.sh       销毁 VM"
+    echo "    ${APP_NAME} ssh           SSH 连入 VM"
+    echo "    ${APP_NAME} chrome        启动 Chrome 浏览器"
+    echo "    ${APP_NAME} status        查看 VM 状态"
+    echo "    ${APP_NAME} destroy       销毁 VM"
     echo ""
 else
     log::warn "VM 启动过程中出现问题"
-    log::info "可手动检查: ./status.sh"
+    log::info "可手动检查: ${APP_NAME} status"
 fi

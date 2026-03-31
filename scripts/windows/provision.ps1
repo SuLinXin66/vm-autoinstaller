@@ -24,11 +24,11 @@ $remoteDir = '/opt/kvm-extensions/scripts'
 Install-VirtualBox
 
 if (-not (Test-VMExists -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 不存在，请先运行 .\install.ps1"
+    Write-LogDie "VM [$vmName] 不存在，请先运行 $env:APP_NAME setup"
 }
 
 if (-not (Test-VMRunning -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 未运行，请先运行 .\start.ps1"
+    Write-LogDie "VM [$vmName] 未运行，请先运行 $env:APP_NAME setup"
 }
 
 $ep = Get-VMSshEndpoint -Name $vmName

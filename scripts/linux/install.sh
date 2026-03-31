@@ -205,7 +205,7 @@ vm::set_ssh_key "$SSH_KEY_PATH"
 if vm_ip="$(vm::wait_ready "$VM_NAME" "$VM_USER")"; then
     # cloud-init 完成后，执行扩展模块（Chrome/Xpra 等）
     log::info "开始执行扩展模块..."
-    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ./provision.sh 重试"
+    "${PROJECT_ROOT}/provision.sh" || log::warn "部分扩展模块执行失败，可稍后运行 ${APP_NAME} provision 重试"
 
     log::banner "安装完成"
     echo ""
@@ -215,14 +215,14 @@ if vm_ip="$(vm::wait_ready "$VM_NAME" "$VM_USER")"; then
     echo "    密钥:    ${SSH_KEY_PATH}"
     echo ""
     echo "  快捷命令："
-    echo "    ./ssh.sh           SSH 连入 VM"
-    echo "    ./chrome.sh        启动 Chrome 浏览器"
-    echo "    ./status.sh        查看 VM 状态"
-    echo "    ./destroy.sh       销毁 VM"
+    echo "    ${APP_NAME} ssh           SSH 连入 VM"
+    echo "    ${APP_NAME} chrome        启动 Chrome 浏览器"
+    echo "    ${APP_NAME} status        查看 VM 状态"
+    echo "    ${APP_NAME} destroy       销毁 VM"
     echo ""
 else
     log::warn "VM 安装过程中出现问题"
     log::info "你可以手动检查:"
     log::info "  virsh console ${VM_NAME}"
-    log::info "  ./status.sh"
+    log::info "  ${APP_NAME} status"
 fi

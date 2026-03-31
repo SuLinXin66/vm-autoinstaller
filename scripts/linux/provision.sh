@@ -46,11 +46,11 @@ sudo::ensure
 
 # 检查 VM 状态
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./install.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ${APP_NAME} setup"
 fi
 
 if ! vm::is_running "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 未运行，请先运行 ./start.sh"
+    log::die "VM [${VM_NAME}] 未运行，请先运行 ${APP_NAME} setup"
 fi
 
 ip="$(vm::get_ip "$VM_NAME")" || log::die "无法获取 VM IP 地址"

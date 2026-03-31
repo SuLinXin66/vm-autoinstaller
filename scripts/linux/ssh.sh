@@ -16,7 +16,7 @@ DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
 
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./install.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ${APP_NAME} setup"
 fi
 
 if ! vm::is_running "$VM_NAME"; then

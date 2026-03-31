@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 启动已存在的 VM，并增量执行扩展
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -19,7 +19,7 @@ $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 if (-not (Test-VMExists -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 不存在，请先运行 .\install.ps1 或 .\setup.ps1"
+    Write-LogDie "VM [$vmName] 不存在，请先运行 $env:APP_NAME setup"
 }
 
 if (Test-Path -LiteralPath $sshKeyPath) {
@@ -41,7 +41,7 @@ try {
 }
 catch {
     Write-LogWarn 'VM 启动过程中出现问题'
-    Write-LogInfo '可手动检查: .\status.ps1'
+    Write-LogInfo "可手动检查: $env:APP_NAME status"
     exit 1
 }
 
@@ -50,7 +50,7 @@ try {
     & $provisionScript
 }
 catch {
-    Write-LogWarn '部分扩展模块执行失败，可稍后运行 .\provision.ps1 重试'
+    Write-LogWarn "部分扩展模块执行失败，可稍后运行 $env:APP_NAME provision 重试"
 }
 
 Write-LogBanner -Title 'VM 已就绪'
@@ -61,8 +61,8 @@ Write-Host "    SSH:     ssh -i $sshKeyPath ${vmUser}@${vmIp}"
 Write-Host "    密钥:    $sshKeyPath"
 Write-Host ''
 Write-Host '  快捷命令：'
-Write-Host '    .\ssh.ps1           SSH 连入 VM'
-Write-Host '    .\chrome.ps1        启动 Chrome 浏览器'
-Write-Host '    .\status.ps1        查看 VM 状态'
-Write-Host '    .\destroy.ps1       销毁 VM'
+Write-Host "    $env:APP_NAME ssh           SSH 连入 VM"
+Write-Host "    $env:APP_NAME chrome        启动 Chrome 浏览器"
+Write-Host "    $env:APP_NAME status        查看 VM 状态"
+Write-Host "    $env:APP_NAME destroy       销毁 VM"
 Write-Host ''

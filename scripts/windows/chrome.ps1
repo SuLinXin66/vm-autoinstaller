@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # Chrome 转发：优先 VcXsrv + X11（ssh -Y）；否则回退到 VM 内 xpra HTML5
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -19,11 +19,11 @@ $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 if (-not (Test-VMExists -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 不存在，请先运行 .\setup.ps1"
+    Write-LogDie "VM [$vmName] 不存在，请先运行 $env:APP_NAME setup"
 }
 
 if (-not (Test-VMRunning -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 未运行，请先运行 .\start.ps1"
+    Write-LogDie "VM [$vmName] 未运行，请先运行 $env:APP_NAME setup"
 }
 
 $ep = Get-VMSshEndpoint -Name $vmName
@@ -31,7 +31,7 @@ $vmHost = $ep.Host
 $vmPort = $ep.Port
 
 if (-not (Test-Path -LiteralPath $sshKeyPath)) {
-    Write-LogDie "SSH 密钥不存在: $sshKeyPath，请先运行 .\install.ps1"
+    Write-LogDie "SSH 密钥不存在: $sshKeyPath，请先运行 $env:APP_NAME setup"
 }
 
 Set-SSHKeyPath -Path $sshKeyPath

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 )
 
@@ -26,6 +27,7 @@ func runUnix(scriptDir, name string, args ...string) error {
 		return fmt.Errorf("脚本不存在: %s", script)
 	}
 	cmd := exec.Command("bash", append([]string{script}, args...)...)
+	cmd.Env = append(os.Environ(), "APP_NAME="+buildinfo.AppName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -44,6 +46,7 @@ func runWindows(scriptDir, name string, args ...string) error {
 	}
 	psArgs = append(psArgs, args...)
 	cmd := exec.Command("powershell.exe", psArgs...)
+	cmd.Env = append(os.Environ(), "APP_NAME="+buildinfo.AppName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

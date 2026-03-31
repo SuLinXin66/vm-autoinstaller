@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -22,6 +24,12 @@ import (
 func main() {
 	root := newRootCmd()
 	if err := root.Execute(); err != nil {
+		// Script errors (ExitError) are already printed to stderr by the script itself.
+		// Only print Go-level errors (unknown command, config missing, etc.).
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -555,20 +563,195 @@ func showInfo() error {
 	}
 
 	cfgPath := paths.ConfigEnvPath()
-	if cfg, err := config.ReadEnv(cfgPath); err == nil {
+	cfg, cfgErr := config.ReadEnv(cfgPath)
+	if cfgErr == nil {
 		vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
 		dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
 		t.AddRow("VM 名称", vmName)
 		t.AddRow("VM 数据目录", dataDir)
+
+		if runtime.GOOS == "windows" {
+			addVBoxInfo(t, vmName)
+		} else {
+			addKVMInfo(t, vmName)
+		}
 	}
 
 	fmt.Print(t.Render())
-
-	fmt.Println()
-	fmt.Println("VM 状态:")
-	_ = runner.RunScript("status")
-
 	return nil
+}
+
+// --- VM resource helpers (KVM/libvirt) ---
+
+func runVirsh(args ...string) (string, error) {
+	allArgs := append([]string{"-c", "qemu:///system"}, args...)
+	out, err := exec.Command("virsh", allArgs...).CombinedOutput()
+	if err == nil {
+		return string(out), nil
+	}
+	sudoArgs := append([]string{"-n", "virsh"}, allArgs...)
+	out, err = exec.Command("sudo", sudoArgs...).CombinedOutput()
+	if err == nil {
+		return string(out), nil
+	}
+	return "", err
+}
+
+func parseKiB(s string) int64 {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, " KiB")
+	s = strings.TrimSuffix(s, " kB")
+	v, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	return v
+}
+
+func formatMem(kib int64) string {
+	mb := kib / 1024
+	if mb >= 1024 {
+		return fmt.Sprintf("%.1f GB", float64(mb)/1024)
+	}
+	return fmt.Sprintf("%d MB", mb)
+}
+
+func addKVMInfo(t *table.Table, vmName string) {
+	out, err := runVirsh("dominfo", vmName)
+	if err != nil {
+		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未创建"))
+		return
+	}
+
+	info := parseVirshKV(out)
+	state := info["State"]
+
+	switch state {
+	case "running":
+		t.AddRow("VM 状态", table.Colorize(table.Green, "运行中"))
+	case "shut off":
+		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已关机"))
+		return
+	case "paused":
+		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已暂停"))
+		return
+	default:
+		t.AddRow("VM 状态", state)
+		return
+	}
+
+	if ip := getVirshIP(vmName); ip != "" {
+		t.AddRow("VM IP", ip)
+	}
+
+	if cpus := info["CPU(s)"]; cpus != "" {
+		t.AddRow("VM CPU", cpus+" 核")
+	}
+	if cpuTime := info["CPU time"]; cpuTime != "" {
+		t.AddRow("VM CPU 时间", cpuTime)
+	}
+
+	maxMem := parseKiB(info["Max memory"])
+	usedMem := parseKiB(info["Used memory"])
+	memStr := formatMem(usedMem)
+	if maxMem > 0 && maxMem != usedMem {
+		memStr += fmt.Sprintf(" / %s", formatMem(maxMem))
+	}
+
+	rss := getVirshRSS(vmName)
+	if rss > 0 {
+		memStr += fmt.Sprintf("  (宿主机 RSS: %s)", formatMem(rss))
+	}
+	t.AddRow("VM 内存", memStr)
+}
+
+func parseVirshKV(out string) map[string]string {
+	m := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		idx := strings.Index(line, ":")
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		m[key] = val
+	}
+	return m
+}
+
+func getVirshIP(vmName string) string {
+	out, err := runVirsh("domifaddr", vmName)
+	if err != nil {
+		out, err = runVirsh("net-dhcp-leases", "default")
+		if err != nil {
+			return ""
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, vmName) {
+				for _, field := range strings.Fields(line) {
+					if strings.Contains(field, ".") && strings.Contains(field, "/") {
+						return strings.SplitN(field, "/", 2)[0]
+					}
+				}
+			}
+		}
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		for _, f := range fields {
+			if strings.Contains(f, ".") && strings.Contains(f, "/") {
+				return strings.SplitN(f, "/", 2)[0]
+			}
+		}
+	}
+	return ""
+}
+
+func getVirshRSS(vmName string) int64 {
+	out, err := runVirsh("dommemstat", vmName)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "rss" {
+			v, _ := strconv.ParseInt(fields[1], 10, 64)
+			return v
+		}
+	}
+	return 0
+}
+
+func addVBoxInfo(t *table.Table, vmName string) {
+	out, err := exec.Command("VBoxManage", "showvminfo", vmName, "--machinereadable").CombinedOutput()
+	if err != nil {
+		t.AddRow("VM 状态", table.Colorize(table.BrightRed, "未创建"))
+		return
+	}
+
+	info := make(map[string]string)
+	for _, line := range strings.Split(string(out), "\n") {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			info[parts[0]] = strings.Trim(parts[1], "\"")
+		}
+	}
+
+	switch info["VMState"] {
+	case "running":
+		t.AddRow("VM 状态", table.Colorize(table.Green, "运行中"))
+	case "poweroff":
+		t.AddRow("VM 状态", table.Colorize(table.Yellow, "已关机"))
+		return
+	default:
+		t.AddRow("VM 状态", info["VMState"])
+		return
+	}
+
+	if cpus := info["cpus"]; cpus != "" {
+		t.AddRow("VM CPU", cpus+" 核")
+	}
+	if mem := info["memory"]; mem != "" {
+		t.AddRow("VM 内存", mem+" MB")
+	}
 }
 
 // --- sync ---

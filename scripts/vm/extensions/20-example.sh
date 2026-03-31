@@ -5,7 +5,7 @@
 # 使用方法：
 #   1. 复制此文件：cp extensions/20-example.sh extensions/30-my-app.sh
 #   2. 修改脚本内容，替换下方的安装逻辑
-#   3. 运行 ./provision.sh 将自动执行新扩展
+#   3. 运行 <APP_NAME> provision 将自动执行新扩展
 #
 # 命名规范：
 #   - 格式：NN-name.sh（NN 为两位数字，控制执行顺序）

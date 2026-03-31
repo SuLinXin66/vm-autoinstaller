@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 使用密钥交互式 SSH 登录 VM（UserKnownHostsFile=NUL 等价于 Linux 下 /dev/null）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -19,7 +19,7 @@ $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 if (-not (Test-VMExists -Name $vmName)) {
-    Write-LogDie "VM [$vmName] 不存在，请先运行 .\install.ps1"
+    Write-LogDie "VM [$vmName] 不存在，请先运行 $env:APP_NAME setup"
 }
 
 if (-not (Test-VMRunning -Name $vmName)) {

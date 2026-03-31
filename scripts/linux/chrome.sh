@@ -243,11 +243,11 @@ _chrome::cleanup_stale_sessions() {
 
 # 检查 VM 是否存在且运行
 if ! vm::exists "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 不存在，请先运行 ./setup.sh"
+    log::die "VM [${VM_NAME}] 不存在，请先运行 ${APP_NAME} setup"
 fi
 
 if ! vm::is_running "$VM_NAME"; then
-    log::die "VM [${VM_NAME}] 未运行，请先运行 ./start.sh"
+    log::die "VM [${VM_NAME}] 未运行，请先运行 ${APP_NAME} setup"
 fi
 
 # 获取 VM IP
@@ -255,7 +255,7 @@ ip="$(vm::get_ip "$VM_NAME")" || log::die "无法获取 VM IP 地址"
 
 # 检查 SSH 密钥
 if [[ ! -f "$SSH_KEY_PATH" ]]; then
-    log::die "SSH 密钥不存在: ${SSH_KEY_PATH}，请先运行 ./install.sh"
+    log::die "SSH 密钥不存在: ${SSH_KEY_PATH}，请先运行 ${APP_NAME} setup"
 fi
 
 # 同步 Chrome 书签策略文件到 VM

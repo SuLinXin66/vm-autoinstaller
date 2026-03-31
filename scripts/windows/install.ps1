@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 # 仓库路径与 vm 目录（与 linux 脚本语义一致）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
@@ -176,7 +176,7 @@ try {
     & $provisionScript
 }
 catch {
-    Write-LogWarn '部分扩展模块执行失败，可稍后运行 .\provision.ps1 重试'
+    Write-LogWarn "部分扩展模块执行失败，可稍后运行 $env:APP_NAME provision 重试"
 }
 
 Write-LogBanner -Title '安装完成'
@@ -187,8 +187,8 @@ Write-Host "    SSH:     ssh -p $vmPort -i $sshKeyPath ${vmUser}@${vmHost}"
 Write-Host "    密钥:    $sshKeyPath"
 Write-Host ''
 Write-Host '  快捷命令：'
-Write-Host '    .\ssh.cmd            SSH 连入 VM'
-Write-Host '    .\chrome.cmd         启动 Chrome 浏览器'
-Write-Host '    .\status.cmd         查看 VM 状态'
-Write-Host '    .\destroy.cmd        销毁 VM'
+Write-Host "    $env:APP_NAME ssh           SSH 连入 VM"
+Write-Host "    $env:APP_NAME chrome        启动 Chrome 浏览器"
+Write-Host "    $env:APP_NAME status        查看 VM 状态"
+Write-Host "    $env:APP_NAME destroy       销毁 VM"
 Write-Host ''
