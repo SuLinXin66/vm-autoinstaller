@@ -89,30 +89,30 @@ done
 log::ok "传输完成 (${#extensions[@]} 个脚本)"
 
 # 按序执行每个扩展
-installed=0
-skipped=0
+succeeded=0
+failed=0
+failed_names=()
 
 for ext in "${extensions[@]}"; do
     name="$(basename "$ext" .sh)"
     log::info "执行扩展: ${name}..."
 
-    # 实时流式输出扩展脚本的执行日志
     if _provision::ssh_exec "$ip" "sudo bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
-        # 检查是否真正执行了安装（通过输出中的"跳过"关键词判断）
-        # 这里用重新检查标记文件的方式更可靠
-        if _provision::ssh_exec "$ip" "test -f /opt/kvm-extensions/${name}.done" 2>/dev/null; then
-            # 标记文件存在，但可能是本次创建的也可能是之前的
-            # 通过脚本输出已经告知用户了
-            true
-        fi
-        (( ++installed )) || true
+        (( ++succeeded )) || true
     else
         log::warn "扩展 [${name}] 执行失败，继续下一个..."
+        (( ++failed )) || true
+        failed_names+=("$name")
     fi
 done
 
 log::banner "扩展执行完成"
-log::info "共处理 ${#extensions[@]} 个扩展"
+if (( failed == 0 )); then
+    log::ok "全部成功: ${succeeded}/${#extensions[@]}"
+else
+    log::warn "成功: ${succeeded}, 失败: ${failed}, 合计: ${#extensions[@]}"
+    log::warn "失败的扩展: ${failed_names[*]}"
+fi
 
 # ── 同步项目内置配置到 VM ──────────────────────────────────
 DOTFILES_DIR="${REPO_ROOT}/vm/config/dotfiles"

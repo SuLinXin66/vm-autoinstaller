@@ -16,7 +16,7 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
 )
 
-//go:embed staging/*
+//go:embed all:staging
 var staging embed.FS
 
 func main() {
