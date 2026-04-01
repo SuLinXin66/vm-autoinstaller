@@ -1,4 +1,4 @@
-﻿# 通用工具：下载、确认、轮询、命令检测（对齐 linux/lib/utils.sh）
+# 通用工具：下载、确认、轮询、命令检测（对齐 linux/lib/utils.sh）
 $ErrorActionPreference = 'Stop'
 
 function Test-CommandExists {
@@ -137,9 +137,69 @@ function Wait-ForCondition {
     return $false
 }
 
+function Install-NerdFont {
+    <#
+    .SYNOPSIS
+        安装 JetBrainsMono Nerd Font（per-user，无需管理员权限）。
+        已安装则跳过。
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$FontFamily = 'JetBrainsMono'
+    )
+
+    $userFontDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+    $regPath = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+
+    $existingFonts = Get-ChildItem -Path $userFontDir -Filter "${FontFamily}*NerdFont*.ttf" -ErrorAction SilentlyContinue
+    if ($existingFonts -and $existingFonts.Count -gt 0) {
+        Write-Host "[INFO ] Nerd Font ($FontFamily) 已安装，跳过"
+        return
+    }
+
+    $zipUrl = "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${FontFamily}.zip"
+    $zipPath = Join-Path $env:TEMP "${FontFamily}-NerdFont.zip"
+    $extractDir = Join-Path $env:TEMP "${FontFamily}-NerdFont"
+
+    Write-Host "[INFO ] 下载 ${FontFamily} Nerd Font..."
+    Invoke-FileDownload -Uri $zipUrl -DestinationPath $zipPath -Description "${FontFamily} Nerd Font"
+
+    if (Test-Path -LiteralPath $extractDir) {
+        Remove-Item -Path $extractDir -Recurse -Force
+    }
+    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+    if (-not (Test-Path -LiteralPath $userFontDir)) {
+        New-Item -ItemType Directory -Path $userFontDir -Force | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $regPath)) {
+        New-Item -Path $regPath -Force | Out-Null
+    }
+
+    $installed = 0
+    Get-ChildItem -Path $extractDir -Filter '*.ttf' -Recurse | ForEach-Object {
+        $destFont = Join-Path $userFontDir $_.Name
+        Copy-Item -Path $_.FullName -Destination $destFont -Force
+        $displayName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+        Set-ItemProperty -Path $regPath -Name "$displayName (TrueType)" -Value $destFont
+        $installed++
+    }
+
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    if ($installed -gt 0) {
+        Write-Host "[OK   ] Nerd Font ($FontFamily) 已安装 ($installed 个字体文件)"
+        Write-Host "[INFO ] 请在 Windows Terminal 设置中将字体更改为: $FontFamily Nerd Font"
+    } else {
+        Write-Host "[WARN ] 未找到可安装的字体文件"
+    }
+}
+
 Export-ModuleMember -Function @(
     'Invoke-FileDownload',
     'Request-UserConfirmation',
     'Wait-ForCondition',
-    'Test-CommandExists'
+    'Test-CommandExists',
+    'Install-NerdFont'
 )

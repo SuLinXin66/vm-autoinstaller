@@ -102,7 +102,7 @@ func ReadEnv(path string) (map[string]string, error) {
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
 		val = parseValue(val)
-		val = os.ExpandEnv(val)
+		val = expandShellVars(val)
 		result[key] = val
 	}
 	return result, scanner.Err()
@@ -141,6 +141,19 @@ func WriteValue(path, key, value string) error {
 	}
 
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+func expandShellVars(val string) string {
+	return os.Expand(val, func(key string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		if key == "HOME" || key == "USERPROFILE" {
+			home, _ := os.UserHomeDir()
+			return home
+		}
+		return ""
+	})
 }
 
 func parseValue(raw string) string {

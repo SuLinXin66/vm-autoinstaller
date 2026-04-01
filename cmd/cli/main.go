@@ -141,13 +141,9 @@ Register-ArgumentCompleter -Native -CommandName '%[1]s.exe' -ScriptBlock $__%[2]
 // --- SSH (root + explicit) ---
 
 func runSSH() error {
-	cfg, err := loadConfig()
-	if err != nil {
-		return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
+	if _, err := ensureVMRunning(); err != nil {
+		return err
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
-	_ = vmName
-
 	return runner.RunScript("ssh")
 }
 
@@ -197,7 +193,11 @@ func newRestartCmd() *cobra.Command {
 		Use:   "restart",
 		Short: "重启 VM（stop + start）",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return restartVM()
+			if err := restartVM(); err != nil {
+				return err
+			}
+			remountShares()
+			return nil
 		},
 	}
 }
@@ -254,6 +254,9 @@ func newChromeCmd() *cobra.Command {
 		Use:   "chrome",
 		Short: "Chrome 浏览器转发到宿主机桌面",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := ensureVMRunning(); err != nil {
+				return err
+			}
 			return runner.RunScript("chrome", args...)
 		},
 	}
@@ -268,9 +271,9 @@ func newExecCmd() *cobra.Command {
 		Long:  "在 VM 内通过 SSH 执行指定命令，不进入交互 Shell",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig()
+			cfg, err := ensureVMRunning()
 			if err != nil {
-				return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
+				return err
 			}
 			user := cfgVal(cfg, "VM_USER", "wpsweb")
 			dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
@@ -280,7 +283,7 @@ func newExecCmd() *cobra.Command {
 
 			sshArgs := []string{
 				"-o", "StrictHostKeyChecking=no",
-				"-o", "UserKnownHostsFile=/dev/null",
+				"-o", "UserKnownHostsFile=" + knownHostsDevNull(),
 				"-o", "LogLevel=ERROR",
 				"-p", sshPort,
 			}
@@ -320,9 +323,9 @@ func newCpCmd() *cobra.Command {
 vm: 前缀表示 VM 内路径。`, buildinfo.AppName, buildinfo.AppName),
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig()
+			cfg, err := ensureVMRunning()
 			if err != nil {
-				return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
+				return err
 			}
 			user := cfgVal(cfg, "VM_USER", "wpsweb")
 			dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
@@ -331,7 +334,7 @@ vm: 前缀表示 VM 内路径。`, buildinfo.AppName, buildinfo.AppName),
 
 			scpArgs := []string{
 				"-o", "StrictHostKeyChecking=no",
-				"-o", "UserKnownHostsFile=/dev/null",
+				"-o", "UserKnownHostsFile=" + knownHostsDevNull(),
 				"-o", "LogLevel=ERROR",
 				"-P", sshPort,
 			}
@@ -772,7 +775,7 @@ func getVirshRSS(vmName string) int64 {
 }
 
 func addVBoxInfo(tw gotable.Writer, vmName string) {
-	out, err := exec.Command("VBoxManage", "showvminfo", vmName, "--machinereadable").CombinedOutput()
+	out, err := exec.Command(findVBoxManage(), "showvminfo", vmName, "--machinereadable").CombinedOutput()
 	if err != nil {
 		tw.AppendRow(gotable.Row{"VM 状态", color.LightRed.Sprint("未创建")})
 		return
@@ -780,9 +783,10 @@ func addVBoxInfo(tw gotable.Writer, vmName string) {
 
 	info := make(map[string]string)
 	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
-			info[parts[0]] = strings.Trim(parts[1], "\"")
+			info[strings.TrimSpace(parts[0])] = strings.TrimSpace(strings.Trim(parts[1], "\""))
 		}
 	}
 
@@ -1005,6 +1009,25 @@ func cfgVal(cfg map[string]string, key, def string) string {
 func defaultDataDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".kvm-ubuntu")
+}
+
+func ensureVMRunning() (map[string]string, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
+	}
+	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	if !isVMRunning(cfg, vmName) {
+		return nil, fmt.Errorf("VM 未运行。请先执行: %s setup", buildinfo.AppName)
+	}
+	return cfg, nil
+}
+
+func knownHostsDevNull() string {
+	if runtime.GOOS == "windows" {
+		return "NUL"
+	}
+	return "/dev/null"
 }
 
 func resolveSSHEndpoint(cfg map[string]string) (host, port string) {

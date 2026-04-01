@@ -155,7 +155,7 @@ if (Test-Path -LiteralPath $dotfilesDir) {
             continue
         }
         Write-LogInfo "同步 $($item.Dst)..."
-        $remotePar = Split-Path -Parent $item.Dst
+        $remotePar = (Split-Path -Parent $item.Dst) -replace '\\', '/'
         if ($remotePar) {
             $prevEAP = $ErrorActionPreference
             $ErrorActionPreference = 'SilentlyContinue'

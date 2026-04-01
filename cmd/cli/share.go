@@ -177,37 +177,40 @@ func shareAdd(hostPath, name, mountPoint, note string) error {
 		AddedAt:    time.Now(),
 	}
 	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	running := isVMRunning(cfg, vmName)
 
-	if err := platformAttachShare(cfg, vmName, &s); err != nil {
+	if err := platformAttachShare(cfg, vmName, &s, running); err != nil {
 		return fmt.Errorf("添加共享设备失败: %w", err)
 	}
 
-	shares = append(shares, s)
-	if err := share.Save(shares); err != nil {
-		return fmt.Errorf("保存配置失败: %w", err)
+	rollback := func() {
+		_ = platformDetachShare(cfg, vmName, &s, running)
 	}
 
-	running := isVMRunning(cfg, vmName)
+	mountOk := false
 
 	if running {
 		if runtime.GOOS == "windows" {
 			if err := vboxMountShare(cfg, &s); err != nil {
-				color.Yellow.Printf("⚠ 挂载失败: %v（可稍后重试）\n", err)
-			} else {
-				color.Green.Println("✓ 共享目录已添加并挂载")
+				rollback()
+				return fmt.Errorf("挂载失败: %w", err)
 			}
+			mountOk = true
+			color.Green.Println("✓ 共享目录已添加并挂载")
 		} else {
 			fmt.Println("9p 设备已写入 VM 配置，需要重启 VM 才能生效。")
 			if promptYN("是否立即重启 VM？", true) {
 				if err := restartVM(); err != nil {
 					return fmt.Errorf("重启 VM 失败: %w", err)
 				}
+				remountShares()
 				if err := ensureFstabEntry(cfg, &s); err != nil {
 					color.Yellow.Printf("⚠ fstab 写入失败: %v\n", err)
 				}
 				if err := sshMount(cfg, s.MountPoint); err != nil {
 					color.Yellow.Printf("⚠ 挂载失败: %v\n", err)
 				} else {
+					mountOk = true
 					color.Green.Println("✓ 共享目录已添加、重启并挂载成功")
 				}
 			} else {
@@ -218,6 +221,12 @@ func shareAdd(hostPath, name, mountPoint, note string) error {
 		fmt.Println("VM 未运行，已添加到配置。启动后自动挂载。")
 	}
 
+	shares = append(shares, s)
+	if err := share.Save(shares); err != nil {
+		return fmt.Errorf("保存配置失败: %w", err)
+	}
+
+	_ = mountOk
 	return nil
 }
 
@@ -254,15 +263,6 @@ func shareRemove(name string) error {
 	shares = append(shares[:idx], shares[idx+1:]...)
 	if err := share.Save(shares); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
-	}
-
-	if running && runtime.GOOS != "windows" {
-		fmt.Println("9p 设备已从 VM 配置中移除。")
-		if promptYN("是否立即重启 VM 以完全生效？", false) {
-			if err := restartVM(); err != nil {
-				color.Yellow.Printf("⚠ 重启失败: %v\n", err)
-			}
-		}
 	}
 
 	color.Green.Printf("✓ 共享目录 [%s] 已移除\n", name)
@@ -345,7 +345,7 @@ func shareSetEnabled(name string, enabled bool) error {
 	s.Enabled = enabled
 
 	if enabled {
-		if err := platformAttachShare(cfg, vmName, s); err != nil {
+		if err := platformAttachShare(cfg, vmName, s, running); err != nil {
 			color.Yellow.Printf("⚠ 挂载设备失败: %v\n", err)
 		}
 		if running {
@@ -359,6 +359,7 @@ func shareSetEnabled(name string, enabled bool) error {
 					if err := restartVM(); err != nil {
 						return fmt.Errorf("重启失败: %w", err)
 					}
+					remountShares()
 					_ = ensureFstabEntry(cfg, s)
 					_ = sshMount(cfg, s.MountPoint)
 				}
@@ -371,11 +372,6 @@ func shareSetEnabled(name string, enabled bool) error {
 		}
 		if err := platformDetachShare(cfg, vmName, s, running); err != nil {
 			color.Yellow.Printf("⚠ 分离设备失败: %v\n", err)
-		}
-		if running && runtime.GOOS != "windows" {
-			if promptYN("是否立即重启 VM 以完全移除 9p 设备？", false) {
-				_ = restartVM()
-			}
 		}
 	}
 
@@ -445,7 +441,7 @@ func shareToggle() error {
 		}
 		shares[i].Enabled = item.Checked
 		if item.Checked {
-			_ = platformAttachShare(cfg, vmName, &shares[i])
+			_ = platformAttachShare(cfg, vmName, &shares[i], running)
 			if running && runtime.GOOS == "windows" {
 				_ = vboxMountShare(cfg, &shares[i])
 			}
@@ -458,9 +454,6 @@ func shareToggle() error {
 				_ = removeFstabEntry(cfg, shares[i].Tag)
 			}
 			_ = platformDetachShare(cfg, vmName, &shares[i], running)
-			if running && runtime.GOOS != "windows" {
-				needRestart = true
-			}
 		}
 	}
 
@@ -541,6 +534,9 @@ func remountShares() {
 			mounted++
 			continue
 		}
+		if runtime.GOOS == "windows" {
+			_ = platformAttachShare(cfg, vmName, s, true)
+		}
 		if err := ensureFstabEntry(cfg, s); err != nil {
 			color.Yellow.Printf("⚠ [%s] fstab 写入失败: %v\n", s.Name, err)
 			failed++
@@ -585,7 +581,7 @@ func sshExec(cfg map[string]string, command string) (string, error) {
 
 	args := []string{
 		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "UserKnownHostsFile=" + knownHostsDevNull(),
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
 		"-p", sshPort,
@@ -594,9 +590,11 @@ func sshExec(cfg map[string]string, command string) (string, error) {
 		if f, e := os.Open(keyPath); e == nil {
 			f.Close()
 			args = append(args, "-i", keyPath)
-		} else {
+		} else if runtime.GOOS != "windows" {
 			return "", fmt.Errorf("SSH 密钥 %s 无法读取（属于 root），请执行: sudo chown $USER %s", keyPath, keyPath)
 		}
+	} else {
+		return "", fmt.Errorf("SSH 密钥不存在: %s", keyPath)
 	}
 	args = append(args, fmt.Sprintf("%s@%s", user, sshHost), command)
 
@@ -629,13 +627,15 @@ func sshMount(cfg map[string]string, mountPoint string) error {
 
 func isVMRunning(cfg map[string]string, vmName string) bool {
 	if runtime.GOOS == "windows" {
-		out, err := exec.Command("VBoxManage", "showvminfo", vmName, "--machinereadable").CombinedOutput()
+		out, err := exec.Command(findVBoxManage(), "showvminfo", vmName, "--machinereadable").CombinedOutput()
 		if err != nil {
 			return false
 		}
 		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "VMState=") {
-				return strings.Trim(strings.TrimPrefix(line, "VMState="), "\"") == "running"
+				val := strings.TrimSpace(strings.Trim(strings.TrimPrefix(line, "VMState="), "\""))
+				return val == "running"
 			}
 		}
 		return false
@@ -693,9 +693,9 @@ func removeFstabEntry(cfg map[string]string, tag string) error {
 // Platform dispatch
 // ---------------------------------------------------------------------------
 
-func platformAttachShare(cfg map[string]string, vmName string, s *share.Share) error {
+func platformAttachShare(cfg map[string]string, vmName string, s *share.Share, running bool) error {
 	if runtime.GOOS == "windows" {
-		return vboxAttachShare(vmName, s)
+		return vboxAttachShare(vmName, s, running)
 	}
 	return kvmAttachShare(vmName, s)
 }
@@ -804,27 +804,69 @@ func kvmDetachShare(vmName string, s *share.Share) error {
 // VirtualBox (Windows) — VBoxManage sharedfolder
 // ---------------------------------------------------------------------------
 
-func vboxAttachShare(vmName string, s *share.Share) error {
-	// Persistent
-	if err := exec.Command("VBoxManage", "sharedfolder", "add", vmName,
-		"--name", s.Tag, "--hostpath", s.HostPath).Run(); err != nil {
+var cachedVBoxManagePath string
+
+func findVBoxManage() string {
+	if cachedVBoxManagePath != "" {
+		return cachedVBoxManagePath
+	}
+	if p, err := exec.LookPath("VBoxManage"); err == nil {
+		cachedVBoxManagePath = p
+		return p
+	}
+	if runtime.GOOS == "windows" {
+		candidates := []string{
+			filepath.Join(os.Getenv("ProgramFiles"), "Oracle", "VirtualBox", "VBoxManage.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Oracle", "VirtualBox", "VBoxManage.exe"),
+		}
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				cachedVBoxManagePath = c
+				return c
+			}
+		}
+	}
+	return "VBoxManage"
+}
+
+func runVBoxManage(args ...string) error {
+	cmd := exec.Command(findVBoxManage(), args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := strings.TrimSpace(string(out))
+		if outStr != "" {
+			return fmt.Errorf("%s", outStr)
+		}
 		return err
 	}
-	// Transient (live, ignore error if VM not running)
-	_ = exec.Command("VBoxManage", "sharedfolder", "add", vmName,
-		"--name", s.Tag, "--hostpath", s.HostPath, "--transient").Run()
+	return nil
+}
+
+func vboxAttachShare(vmName string, s *share.Share, running bool) error {
+	errTransient := runVBoxManage("sharedfolder", "add", vmName,
+		"--name", s.Tag, "--hostpath", s.HostPath, "--transient")
+	errPersistent := runVBoxManage("sharedfolder", "add", vmName,
+		"--name", s.Tag, "--hostpath", s.HostPath)
+
+	if errTransient != nil && errPersistent != nil {
+		if running {
+			return errTransient
+		}
+		return errPersistent
+	}
 	return nil
 }
 
 func vboxDetachShare(vmName string, s *share.Share, running bool) error {
-	// Persistent remove
-	err := exec.Command("VBoxManage", "sharedfolder", "remove", vmName,
-		"--name", s.Tag).Run()
-	if running {
-		_ = exec.Command("VBoxManage", "sharedfolder", "remove", vmName,
-			"--name", s.Tag, "--transient").Run()
+	errTransient := runVBoxManage("sharedfolder", "remove", vmName, "--name", s.Tag, "--transient")
+	errPersistent := runVBoxManage("sharedfolder", "remove", vmName, "--name", s.Tag)
+	if errTransient != nil && errPersistent != nil {
+		if running {
+			return errTransient
+		}
+		return errPersistent
 	}
-	return err
+	return nil
 }
 
 func vboxMountShare(cfg map[string]string, s *share.Share) error {

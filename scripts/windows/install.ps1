@@ -68,6 +68,9 @@ if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?' 
     exit 0
 }
 
+# --- 0) Nerd Font ---
+Install-NerdFont
+
 # --- 1) VirtualBox ---
 Write-LogStep '安装 / 检测 VirtualBox'
 Install-VirtualBox
@@ -191,4 +194,8 @@ Write-Host "    $env:APP_NAME ssh           SSH 连入 VM"
 Write-Host "    $env:APP_NAME chrome        启动 Chrome 浏览器"
 Write-Host "    $env:APP_NAME status        查看 VM 状态"
 Write-Host "    $env:APP_NAME destroy       销毁 VM"
+Write-Host ''
+Write-Host '  终端字体：'
+Write-Host '    已安装 JetBrainsMono Nerd Font。'
+Write-Host '    请在 Windows Terminal 设置 → 配置文件 → 外观 → 字体 中选择 "JetBrainsMono Nerd Font"'
 Write-Host ''
