@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
 )
 
 type Level int
@@ -45,14 +48,25 @@ type KeyMeta struct {
 }
 
 var KnownKeys = map[string]KeyMeta{
-	"VM_NAME":        {Description: "VM 名称", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: "ubuntu-server"},
-	"VM_CPUS":        {Description: "CPU 核数", EffectLevel: LevelRestart, Type: TypeInt, DefaultValue: "2"},
-	"VM_MEMORY":      {Description: "内存 (MB)", EffectLevel: LevelRestart, Type: TypeInt, DefaultValue: "2048"},
-	"VM_DISK_SIZE":   {Description: "磁盘大小 (GB)", EffectLevel: LevelRebuild, Type: TypeInt, DefaultValue: "20"},
-	"VM_USER":        {Description: "登录用户名", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: "wpsweb"},
-	"UBUNTU_VERSION": {Description: "Ubuntu 版本", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: "24.04"},
-	"NETWORK_MODE":   {Description: "网络模式", EffectLevel: LevelRebuild, Type: TypeEnum, EnumValues: []string{"nat", "bridge"}, DefaultValue: "nat"},
-	"DATA_DIR":       {Description: "镜像和磁盘存储目录", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: "~/.kvm-ubuntu"},
+	"VM_NAME":                {Description: "VM 名称", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: buildinfo.DefaultVMName},
+	"VM_CPUS":                {Description: "CPU 核数 (0=自动)", EffectLevel: LevelRestart, Type: TypeInt, DefaultValue: buildinfo.DefaultVMCPUs},
+	"VM_MEMORY":              {Description: "内存 (MB)", EffectLevel: LevelRestart, Type: TypeInt, DefaultValue: buildinfo.DefaultVMMemory},
+	"VM_DISK_SIZE":           {Description: "磁盘大小 (GB)", EffectLevel: LevelRebuild, Type: TypeInt, DefaultValue: buildinfo.DefaultVMDiskSize},
+	"VM_USER":                {Description: "登录用户名", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: buildinfo.DefaultVMUser},
+	"UBUNTU_VERSION":         {Description: "Ubuntu 版本", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: buildinfo.DefaultUbuntuVersion},
+	"NETWORK_MODE":           {Description: "网络模式", EffectLevel: LevelRebuild, Type: TypeEnum, EnumValues: []string{"nat", "bridge"}, DefaultValue: buildinfo.DefaultNetworkMode},
+	"BRIDGE_NAME":            {Description: "桥接网卡名", EffectLevel: LevelRebuild, Type: TypeString, DefaultValue: buildinfo.DefaultBridgeName},
+	"DATA_DIR":               {Description: "镜像和磁盘存储目录", EffectLevel: LevelRebuild, Type: TypeString},
+	"UBUNTU_IMAGE_BASE_URL":  {Description: "Cloud Image 下载源", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultUbuntuImageBaseURL},
+	"AUTO_YES":               {Description: "跳过确认提示", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultAutoYes},
+	"ENFORCE_RESOURCE_LIMIT": {Description: "强制资源下限", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultEnforceResourceLimit},
+}
+
+func init() {
+	k := KnownKeys["DATA_DIR"]
+	home, _ := os.UserHomeDir()
+	k.DefaultValue = filepath.Join(home, "."+buildinfo.AppName)
+	KnownKeys["DATA_DIR"] = k
 }
 
 func ValidateValue(key, value string) error {
@@ -63,7 +77,14 @@ func ValidateValue(key, value string) error {
 	switch m.Type {
 	case TypeInt:
 		n, err := strconv.Atoi(value)
-		if err != nil || n <= 0 {
+		if err != nil {
+			return fmt.Errorf("键 %s 的值必须为整数，当前: %s", key, value)
+		}
+		if key == "VM_CPUS" {
+			if n < 0 {
+				return fmt.Errorf("键 %s 的值必须 >= 0（0=自动），当前: %s", key, value)
+			}
+		} else if n <= 0 {
 			return fmt.Errorf("键 %s 的值必须为正整数，当前: %s", key, value)
 		}
 	case TypeEnum:

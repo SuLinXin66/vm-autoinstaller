@@ -101,7 +101,7 @@ func resolveVMMountPoint(cfg map[string]string, mountPoint string) string {
 	if mountPoint == "" {
 		return ""
 	}
-	vmUser := cfgVal(cfg, "VM_USER", "wpsweb")
+	vmUser := cfgVal(cfg, "VM_USER")
 	vmHome := "/home/" + vmUser
 	if strings.HasPrefix(mountPoint, "~/") {
 		return vmHome + mountPoint[1:]
@@ -176,7 +176,7 @@ func shareAdd(hostPath, name, mountPoint, note string) error {
 		Note:       note,
 		AddedAt:    time.Now(),
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	running := isVMRunning(cfg, vmName)
 
 	if err := platformAttachShare(cfg, vmName, &s, running); err != nil {
@@ -248,7 +248,7 @@ func shareRemove(name string) error {
 	if err != nil {
 		return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	running := isVMRunning(cfg, vmName)
 
 	if running {
@@ -287,7 +287,7 @@ func shareList() error {
 	vmName := ""
 	running := false
 	if cfg != nil {
-		vmName = cfgVal(cfg, "VM_NAME", "ubuntu-server")
+		vmName = cfgVal(cfg, "VM_NAME")
 		running = isVMRunning(cfg, vmName)
 	}
 
@@ -339,7 +339,7 @@ func shareSetEnabled(name string, enabled bool) error {
 	if err != nil {
 		return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	running := isVMRunning(cfg, vmName)
 
 	s.Enabled = enabled
@@ -431,7 +431,7 @@ func shareToggle() error {
 	if err != nil {
 		return fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	running := isVMRunning(cfg, vmName)
 	needRestart := false
 
@@ -491,7 +491,7 @@ func showShareSummary() {
 	vmName := ""
 	running := false
 	if cfg != nil {
-		vmName = cfgVal(cfg, "VM_NAME", "ubuntu-server")
+		vmName = cfgVal(cfg, "VM_NAME")
 		running = isVMRunning(cfg, vmName)
 	}
 
@@ -519,7 +519,7 @@ func remountShares() {
 	if err != nil {
 		return
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	if !isVMRunning(cfg, vmName) {
 		return
 	}
@@ -563,15 +563,15 @@ func remountShares() {
 // ---------------------------------------------------------------------------
 
 func sshExec(cfg map[string]string, command string) (string, error) {
-	user := cfgVal(cfg, "VM_USER", "wpsweb")
-	dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
+	user := cfgVal(cfg, "VM_USER")
+	dataDir := cfgVal(cfg, "DATA_DIR")
 	keyPath := filepath.Join(dataDir, "id_ed25519")
 
 	var sshHost, sshPort string
 	if runtime.GOOS == "windows" {
 		sshHost, sshPort = "127.0.0.1", "2222"
 	} else {
-		vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+		vmName := cfgVal(cfg, "VM_NAME")
 		ip := getVirshIP(vmName)
 		if ip == "" {
 			return "", fmt.Errorf("无法获取 VM IP")

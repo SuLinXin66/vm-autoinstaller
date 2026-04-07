@@ -20,7 +20,10 @@ source "${REPO_ROOT}/vm/config.env"
 
 # Allow environment variable overrides
 VM_NAME="${VM_NAME:-ubuntu-server}"
-VM_CPUS="${VM_CPUS:-2}"
+VM_CPUS="${VM_CPUS:-0}"
+if [[ "$VM_CPUS" == "0" || -z "$VM_CPUS" ]]; then
+    VM_CPUS="$(nproc)"
+fi
 VM_MEMORY="${VM_MEMORY:-2048}"
 VM_DISK_SIZE="${VM_DISK_SIZE:-20}"
 VM_USER="${VM_USER:-wpsweb}"

@@ -8,9 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
+	"github.com/gookit/color"
+
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/config"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/hostinfo"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/meta"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
@@ -38,6 +43,10 @@ func main() {
 
 func run() error {
 	fmt.Printf("%s installer v%s\n\n", buildinfo.AppName, buildinfo.Version)
+
+	if err := checkResources(); err != nil {
+		return err
+	}
 
 	dataRoot := paths.DataRoot()
 	repoDir := paths.RepoDir()
@@ -108,6 +117,8 @@ func run() error {
 			_ = os.WriteFile(configPath, exData, 0o644)
 			fmt.Println("  ✓ 已从模板创建 config.env")
 		}
+	} else {
+		repairConfigEnv(configPath, configExample)
 	}
 	m := &meta.InstallMeta{
 		AppName:       buildinfo.AppName,
@@ -237,5 +248,93 @@ func printRestartHint(modified []string) {
 
 func hasBOM(data []byte) bool {
 	return len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF
+}
+
+func repairConfigEnv(configPath, examplePath string) {
+	cfg, err := config.ReadEnv(configPath)
+	if err != nil {
+		return
+	}
+	dataDir := cfg["DATA_DIR"]
+	if dataDir == "" {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(dataDir, home) {
+		return
+	}
+	if strings.HasPrefix(dataDir, "/") || strings.HasPrefix(dataDir, "$") || strings.HasPrefix(dataDir, "~") {
+		return
+	}
+	// DATA_DIR looks broken (e.g. PID + {HOME}), reset from template
+	exCfg, err := config.ReadEnv(examplePath)
+	if err != nil {
+		return
+	}
+	if exDir, ok := exCfg["DATA_DIR"]; ok && exDir != "" {
+		_ = config.WriteValue(configPath, "DATA_DIR", exDir)
+		color.Yellow.Printf("  ⚠ DATA_DIR 异常，已从模板修复: %s\n", exDir)
+	}
+}
+
+func checkResources() error {
+	hi, err := hostinfo.Get()
+	if err != nil {
+		color.Yellow.Printf("⚠ 无法获取宿主机信息: %v，跳过资源检查\n\n", err)
+		return nil
+	}
+
+	vmCPUs, _ := strconv.Atoi(getDefault("VM_CPUS", buildinfo.DefaultVMCPUs))
+	vmMemMB, _ := strconv.Atoi(getDefault("VM_MEMORY", buildinfo.DefaultVMMemory))
+	vmDiskGB, _ := strconv.Atoi(getDefault("VM_DISK_SIZE", buildinfo.DefaultVMDiskSize))
+
+	if vmCPUs <= 0 {
+		vmCPUs = hi.LogicalCPUs
+	}
+
+	fmt.Println("系统资源检查:")
+	ok := true
+
+	if hi.LogicalCPUs >= vmCPUs {
+		color.Green.Printf("  ✓ CPU:    宿主机 %d 核 >= 需要 %d 核\n", hi.LogicalCPUs, vmCPUs)
+	} else {
+		color.LightRed.Printf("  ✗ CPU:    宿主机 %d 核 < 需要 %d 核\n", hi.LogicalCPUs, vmCPUs)
+		ok = false
+	}
+
+	if int(hi.TotalMemoryMB) >= vmMemMB {
+		color.Green.Printf("  ✓ 内存:   宿主机 %d MB >= 需要 %d MB\n", hi.TotalMemoryMB, vmMemMB)
+	} else {
+		color.LightRed.Printf("  ✗ 内存:   宿主机 %d MB < 需要 %d MB\n", hi.TotalMemoryMB, vmMemMB)
+		ok = false
+	}
+
+	dataRoot := paths.DataRoot()
+	needGB := vmDiskGB + 5
+	availGB, diskErr := hostinfo.DiskAvailGB(dataRoot)
+	if diskErr == nil {
+		if int(availGB) >= needGB {
+			color.Green.Printf("  ✓ 磁盘:   可用 %d GB >= 需要 %d GB\n", availGB, needGB)
+		} else {
+			color.LightRed.Printf("  ✗ 磁盘:   可用 %d GB < 需要 %d GB\n", availGB, needGB)
+			ok = false
+		}
+	}
+
+	fmt.Println()
+	if !ok {
+		return fmt.Errorf("宿主机资源不满足 VM 配置要求，请升级硬件")
+	}
+	return nil
+}
+
+func getDefault(key, fallback string) string {
+	cfgPath := paths.ConfigEnvPath()
+	if cfg, err := config.ReadEnv(cfgPath); err == nil {
+		if v, ok := cfg[key]; ok && v != "" {
+			return v
+		}
+	}
+	return fallback
 }
 

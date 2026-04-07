@@ -16,6 +16,7 @@ import (
 
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/config"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/hostinfo"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/meta"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
@@ -275,8 +276,8 @@ func newExecCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			user := cfgVal(cfg, "VM_USER", "wpsweb")
-			dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
+			user := cfgVal(cfg, "VM_USER")
+			dataDir := cfgVal(cfg, "DATA_DIR")
 			keyPath := filepath.Join(dataDir, "id_ed25519")
 
 			sshHost, sshPort := resolveSSHEndpoint(cfg)
@@ -327,8 +328,8 @@ vm: 前缀表示 VM 内路径。`, buildinfo.AppName, buildinfo.AppName),
 			if err != nil {
 				return err
 			}
-			user := cfgVal(cfg, "VM_USER", "wpsweb")
-			dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
+			user := cfgVal(cfg, "VM_USER")
+			dataDir := cfgVal(cfg, "DATA_DIR")
 			keyPath := filepath.Join(dataDir, "id_ed25519")
 			sshHost, sshPort := resolveSSHEndpoint(cfg)
 
@@ -515,6 +516,9 @@ func setConfig(key, value string) error {
 	if err := config.ValidateValue(key, value); err != nil {
 		return err
 	}
+	if err := validateResourceChange(key, value); err != nil {
+		return err
+	}
 
 	if m, known := config.KnownKeys[key]; !known {
 		fmt.Fprintf(os.Stderr, "⚠ 未知的配置键: %s（可能是拼写错误）\n", key)
@@ -603,8 +607,8 @@ func showInfo() error {
 	cfgPath := paths.ConfigEnvPath()
 	cfg, cfgErr := config.ReadEnv(cfgPath)
 	if cfgErr == nil {
-		vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
-		dataDir := cfgVal(cfg, "DATA_DIR", defaultDataDir())
+		vmName := cfgVal(cfg, "VM_NAME")
+		dataDir := cfgVal(cfg, "DATA_DIR")
 		tw.AppendRow(gotable.Row{"VM 名称", vmName})
 		tw.AppendRow(gotable.Row{"VM 数据目录", dataDir})
 
@@ -993,22 +997,86 @@ del "%%~f0"
 	_ = c.Start()
 }
 
+func validateResourceChange(key, value string) error {
+	resourceKeys := map[string]string{
+		"VM_CPUS":      buildinfo.DefaultVMCPUs,
+		"VM_MEMORY":    buildinfo.DefaultVMMemory,
+		"VM_DISK_SIZE": buildinfo.DefaultVMDiskSize,
+	}
+	minStr, isResource := resourceKeys[key]
+	if !isResource {
+		return nil
+	}
+
+	newVal, err := strconv.Atoi(value)
+	if err != nil {
+		return nil
+	}
+
+	cfg, _ := loadConfig()
+	enforce := buildinfo.DefaultEnforceResourceLimit == "1"
+	if cfg != nil {
+		if v := cfgVal(cfg, "ENFORCE_RESOURCE_LIMIT"); v == "0" {
+			enforce = false
+		}
+	}
+
+	if enforce {
+		minVal, _ := strconv.Atoi(minStr)
+		if key == "VM_CPUS" && newVal == 0 {
+			// 0=auto is always allowed
+		} else if minVal > 0 && newVal < minVal {
+			return fmt.Errorf("资源下限保护: %s 不能低于构建时默认值 %d（当前设置: %s）\n"+
+				"  如需解除限制，请先执行: %s config set ENFORCE_RESOURCE_LIMIT 0",
+				key, minVal, value, buildinfo.AppName)
+		}
+	}
+
+	hi, err := hostinfo.Get()
+	if err != nil {
+		return nil
+	}
+
+	switch key {
+	case "VM_CPUS":
+		if newVal > 0 && newVal > hi.LogicalCPUs {
+			return fmt.Errorf("VM CPU %d 核超过宿主机可用 %d 核", newVal, hi.LogicalCPUs)
+		}
+	case "VM_MEMORY":
+		if newVal > int(hi.TotalMemoryMB) {
+			return fmt.Errorf("VM 内存 %d MB 超过宿主机总内存 %d MB", newVal, hi.TotalMemoryMB)
+		}
+	case "VM_DISK_SIZE":
+		dataDir := ""
+		if cfg != nil {
+			dataDir = cfgVal(cfg, "DATA_DIR")
+		}
+		if dataDir != "" {
+			if availGB, e := hostinfo.DiskAvailGB(dataDir); e == nil {
+				if newVal > int(availGB) {
+					return fmt.Errorf("VM 磁盘 %d GB 超过可用空间 %d GB（%s）", newVal, availGB, dataDir)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // --- helpers ---
 
 func loadConfig() (map[string]string, error) {
 	return config.ReadEnv(paths.ConfigEnvPath())
 }
 
-func cfgVal(cfg map[string]string, key, def string) string {
+func cfgVal(cfg map[string]string, key string) string {
 	if v, ok := cfg[key]; ok && v != "" {
 		return v
 	}
-	return def
-}
-
-func defaultDataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".kvm-ubuntu")
+	if m, ok := config.KnownKeys[key]; ok {
+		return m.DefaultValue
+	}
+	return ""
 }
 
 func ensureVMRunning() (map[string]string, error) {
@@ -1016,7 +1084,7 @@ func ensureVMRunning() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("配置未找到。请先运行: %s setup", buildinfo.AppName)
 	}
-	vmName := cfgVal(cfg, "VM_NAME", "ubuntu-server")
+	vmName := cfgVal(cfg, "VM_NAME")
 	if !isVMRunning(cfg, vmName) {
 		return nil, fmt.Errorf("VM 未运行。请先执行: %s setup", buildinfo.AppName)
 	}

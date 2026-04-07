@@ -30,7 +30,10 @@ $cfg = Read-ProjectConfig
 
 # 默认值（与用户需求一致；config.env 可覆盖）
 $vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$vmCpus = [int](Get-ConfigValue -Config $cfg -Key 'VM_CPUS' -Default '2')
+$vmCpus = [int](Get-ConfigValue -Config $cfg -Key 'VM_CPUS' -Default '0')
+if ($vmCpus -le 0) {
+    $vmCpus = [int]$env:NUMBER_OF_PROCESSORS
+}
 $vmMem = [int](Get-ConfigValue -Config $cfg -Key 'VM_MEMORY' -Default '2048')
 $vmDiskGb = [int](Get-ConfigValue -Config $cfg -Key 'VM_DISK_SIZE' -Default '20')
 $vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'

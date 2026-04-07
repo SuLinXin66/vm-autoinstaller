@@ -94,8 +94,7 @@ kvm-ubuntu chrome
 ## 项目结构
 
 ```
-build.env                       # 构建变量（fork 时修改此文件）
-build.env.example               # 构建变量模板
+build.env                       # 构建变量（fork/定制时修改此文件）
 Makefile                        # 构建入口
 go.mod
 cmd/
@@ -138,8 +137,7 @@ kvm-ubuntu provision
 构建需要 Go 1.22+ 和类 Unix 环境（Linux/macOS，Windows 需 WSL/Git Bash）。
 
 ```bash
-# 1. 编辑构建配置
-cp build.env.example build.env
+# 1. 编辑构建配置（fork 后按需修改）
 vim build.env
 
 # 2. 构建全平台 installer

@@ -106,7 +106,7 @@ func TestValidateValue(t *testing.T) {
 		wantErr  bool
 	}{
 		{"VM_CPUS", "4", false},
-		{"VM_CPUS", "0", true},
+		{"VM_CPUS", "0", false},
 		{"VM_CPUS", "-1", true},
 		{"VM_CPUS", "abc", true},
 		{"NETWORK_MODE", "nat", false},
