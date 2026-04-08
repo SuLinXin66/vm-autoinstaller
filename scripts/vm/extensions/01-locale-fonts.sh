@@ -2,13 +2,15 @@
 # Extension: locale-fonts
 # Description: 配置中文 locale 和 CJK 字体，为所有需要中文支持的应用提供基础环境
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 
 echo "[${EXTENSION_NAME}] 配置中文环境..."
 
 echo "[1/3] 安装 locales 和 CJK 字体..."
-apt-get install -y -q locales fonts-noto-cjk
+apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" locales fonts-noto-cjk
 
 echo "[2/4] 生成 zh_CN.UTF-8 locale..."
 sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen

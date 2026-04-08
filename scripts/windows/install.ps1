@@ -149,8 +149,8 @@ $rendered = $rendered.Replace("`r`n", "`n")
 # Inject proxy into cloud-init if configured
 if ($proxy) {
     Write-LogInfo "注入代理配置: $proxy"
-    $aptSection = "apt:`n  http_proxy: `"$proxy`"`n  https_proxy: `"$proxy`"`n"
-    $rendered = $rendered.Replace("package_update: true", "${aptSection}package_update: true")
+    $proxyAptLines = "  http_proxy: `"$proxy`"`n  https_proxy: `"$proxy`""
+    $rendered = $rendered -replace '(?m)^apt:', "apt:`n$proxyAptLines"
 
     $proxyFiles = @"
   - path: /etc/profile.d/proxy.sh
@@ -191,13 +191,8 @@ if ($aptMirror) {
     }
     if ($mirrorUbuntuUrl) {
         Write-LogInfo "注入 APT 镜像源: $aptMirror"
-        $mirrorBlock = "apt:`n  primary:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl`n  security:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl`n"
-        if ($rendered -match '(?m)^apt:') {
-            $rendered = $rendered -replace '(?m)^apt:', "${mirrorBlock}apt_merged:"
-            $rendered = $rendered -replace 'apt_merged:', 'apt:'
-        } else {
-            $rendered = $rendered.Replace("package_update: true", "${mirrorBlock}package_update: true")
-        }
+        $mirrorLines = "  primary:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl`n  security:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl"
+        $rendered = $rendered -replace '(?m)^apt:', "apt:`n$mirrorLines"
         if ($mirrorDockerUrl) {
             $rendered = $rendered.Replace('https://download.docker.com/linux/ubuntu', $mirrorDockerUrl)
         }

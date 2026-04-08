@@ -25,6 +25,14 @@ output:
 bootcmd:
   - [sh, -c, 'test -f /etc/default/grub && grep -q "console=ttyS0" /etc/default/grub || (sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyS0,115200 /" /etc/default/grub && update-grub)']
 
+apt:
+  conf: |
+    Dpkg::Options {
+      "--force-confdef";
+      "--force-confold";
+    };
+    APT::Get::Assume-Yes "true";
+
 package_update: true
 package_upgrade: true
 
@@ -43,6 +51,8 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      export NEEDRESTART_MODE=a
 
       echo "[1/4] Adding Docker GPG key..."
       install -m 0755 -d /etc/apt/keyrings
@@ -75,7 +85,7 @@ write_files:
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
-  - bash /opt/setup-docker.sh
+  - export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a && bash /opt/setup-docker.sh
   - echo "CLOUDINIT_SETUP_COMPLETE" > /var/log/cloud-init-done.log
 
 final_message: "Cloud-init completed. System uptime: $UPTIME"

@@ -2,6 +2,8 @@
 # Extension: chrome-xpra
 # Description: 安装 Chrome 浏览器和 Xpra 远程显示服务，用于宿主机无缝窗口转发
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 

@@ -200,9 +200,8 @@ envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY}' \
 if [[ -n "$PROXY" ]]; then
     log::info "注入代理配置: ${PROXY}"
 
-    # 1. apt proxy (cloud-init apt module) — insert before package_update
-    sed -i "/^package_update: true/i\\
-apt:\\
+    # 1. apt proxy (cloud-init apt module) — append to existing apt: block
+    sed -i "/^apt:/a\\
   http_proxy: \"${PROXY}\"\\
   https_proxy: \"${PROXY}\"" "$USER_DATA"
 
@@ -265,26 +264,14 @@ if [[ -n "$APT_MIRROR" ]]; then
     if [[ -n "$_mirror_ubuntu_url" ]]; then
         log::info "注入 APT 镜像源: ${APT_MIRROR}"
 
-        # cloud-init apt module: set primary + security mirror
-        # Insert apt.primary/security block before package_update (merge with existing apt: block if proxy added one)
-        if grep -q '^apt:' "$USER_DATA"; then
-            sed -i "/^apt:/a\\
+        # cloud-init apt module: append primary + security mirror to existing apt: block
+        sed -i "/^apt:/a\\
   primary:\\
     - arches: [default]\\
       uri: ${_mirror_ubuntu_url}\\
   security:\\
     - arches: [default]\\
       uri: ${_mirror_ubuntu_url}" "$USER_DATA"
-        else
-            sed -i "/^package_update: true/i\\
-apt:\\
-  primary:\\
-    - arches: [default]\\
-      uri: ${_mirror_ubuntu_url}\\
-  security:\\
-    - arches: [default]\\
-      uri: ${_mirror_ubuntu_url}" "$USER_DATA"
-        fi
 
         # Replace Docker CE source in setup-docker.sh if we have a docker mirror
         if [[ -n "$_mirror_docker_url" ]]; then

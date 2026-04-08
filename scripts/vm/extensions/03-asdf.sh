@@ -2,6 +2,8 @@
 # Extension: asdf
 # Description: 按官方方式安装 asdf Go 二进制（GitHub Release latest），清理旧 bash 版仓库文件，生成 zsh 补全
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 

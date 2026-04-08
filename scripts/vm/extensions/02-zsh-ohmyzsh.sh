@@ -3,6 +3,8 @@
 # Description: 安装 zsh + oh-my-zsh + oh-my-posh + 常用插件 + fzf + eza + neovim + fastfetch
 #              + lazygit + yazi + neovim 编译依赖，并将 VM 用户默认 shell 设为 zsh
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 
