@@ -71,6 +71,7 @@ func newRootCmd() *cobra.Command {
 		newInfoCmd(),
 		newShareCmd(),
 		newProxyCmd(),
+		newMirrorCmd(),
 		newSyncCmd(),
 		newUpgradeCmd(),
 		newUninstallCmd(),
@@ -177,6 +178,7 @@ func newSetupCmd() *cobra.Command {
 			reconcileAndPrintBuiltinShares()
 			remountShares()
 			ensureProxy()
+			ensureMirror()
 			return nil
 		},
 	}
@@ -207,6 +209,7 @@ func newRestartCmd() *cobra.Command {
 			reconcileAndPrintBuiltinShares()
 			remountShares()
 			ensureProxy()
+			ensureMirror()
 			return nil
 		},
 	}

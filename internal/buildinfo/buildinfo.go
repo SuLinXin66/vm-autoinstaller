@@ -18,4 +18,5 @@ var (
 	DefaultAutoYes              = "0"
 	DefaultEnforceResourceLimit = "1"
 	DefaultBuiltinShares        = ""
+	DefaultAPTMirror            = ""
 )

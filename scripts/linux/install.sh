@@ -33,6 +33,7 @@ BRIDGE_NAME="${BRIDGE_NAME:-br0}"
 DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 UBUNTU_IMAGE_BASE_URL="${UBUNTU_IMAGE_BASE_URL:-https://cloud-images.ubuntu.com/releases}"
 PROXY="${PROXY:-}"
+APT_MIRROR="${APT_MIRROR:-}"
 
 # --- Derived paths ---
 ARCH="$(uname -m)"
@@ -88,6 +89,9 @@ echo "  网络模式:   ${NETWORK_MODE}"
 echo "  数据目录:   ${DATA_DIR}"
 if [[ -n "$PROXY" ]]; then
 echo "  代理:       ${PROXY}"
+fi
+if [[ -n "$APT_MIRROR" ]]; then
+echo "  APT 镜像:   ${APT_MIRROR}"
 fi
 echo ""
 
@@ -226,6 +230,69 @@ apt:\\
     sed -i '/set -euo pipefail/a\      [ -f /etc/profile.d/proxy.sh ] && source /etc/profile.d/proxy.sh' "$USER_DATA"
 
     log::ok "代理已注入 cloud-init（apt + Docker + 环境变量）"
+fi
+
+# Inject APT mirror config into cloud-init if configured
+if [[ -n "$APT_MIRROR" ]]; then
+    # Resolve preset name to URL
+    _mirror_ubuntu_url=""
+    _mirror_docker_url=""
+    case "$APT_MIRROR" in
+        ustc)
+            _mirror_ubuntu_url="https://mirrors.ustc.edu.cn/ubuntu/"
+            _mirror_docker_url="https://mirrors.ustc.edu.cn/docker-ce/linux/ubuntu"
+            ;;
+        tsinghua)
+            _mirror_ubuntu_url="https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
+            _mirror_docker_url="https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu"
+            ;;
+        aliyun)
+            _mirror_ubuntu_url="https://mirrors.aliyun.com/ubuntu/"
+            _mirror_docker_url="https://mirrors.aliyun.com/docker-ce/linux/ubuntu"
+            ;;
+        huawei)
+            _mirror_ubuntu_url="https://repo.huaweicloud.com/ubuntu/"
+            _mirror_docker_url="https://repo.huaweicloud.com/docker-ce/linux/ubuntu"
+            ;;
+        http://*|https://*)
+            _mirror_ubuntu_url="${APT_MIRROR%/}/"
+            ;;
+        *)
+            log::warn "未知的 APT_MIRROR 值: ${APT_MIRROR}，跳过镜像注入"
+            ;;
+    esac
+
+    if [[ -n "$_mirror_ubuntu_url" ]]; then
+        log::info "注入 APT 镜像源: ${APT_MIRROR}"
+
+        # cloud-init apt module: set primary + security mirror
+        # Insert apt.primary/security block before package_update (merge with existing apt: block if proxy added one)
+        if grep -q '^apt:' "$USER_DATA"; then
+            sed -i "/^apt:/a\\
+  primary:\\
+    - arches: [default]\\
+      uri: ${_mirror_ubuntu_url}\\
+  security:\\
+    - arches: [default]\\
+      uri: ${_mirror_ubuntu_url}" "$USER_DATA"
+        else
+            sed -i "/^package_update: true/i\\
+apt:\\
+  primary:\\
+    - arches: [default]\\
+      uri: ${_mirror_ubuntu_url}\\
+  security:\\
+    - arches: [default]\\
+      uri: ${_mirror_ubuntu_url}" "$USER_DATA"
+        fi
+
+        # Replace Docker CE source in setup-docker.sh if we have a docker mirror
+        if [[ -n "$_mirror_docker_url" ]]; then
+            sed -i "s|https://download.docker.com/linux/ubuntu|${_mirror_docker_url}|g" "$USER_DATA"
+        fi
+
+        log::ok "APT 镜像源已注入 cloud-init（Ubuntu + Docker）"
+    fi
 fi
 
 # Create seed ISO

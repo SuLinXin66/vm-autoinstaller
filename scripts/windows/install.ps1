@@ -43,6 +43,7 @@ $bridgeName = Get-ConfigValue -Config $cfg -Key 'BRIDGE_NAME' -Default 'br0'
 $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
 $imgBase = Get-ConfigValue -Config $cfg -Key 'UBUNTU_IMAGE_BASE_URL' -Default 'https://cloud-images.ubuntu.com/releases'
 $proxy = Get-ConfigValue -Config $cfg -Key 'PROXY' -Default ''
+$aptMirror = Get-ConfigValue -Config $cfg -Key 'APT_MIRROR' -Default ''
 
 $cloudArch = 'amd64'
 $imageName = "ubuntu-${ubuntuVer}-server-cloudimg-${cloudArch}.img"
@@ -66,6 +67,7 @@ Write-Host "  Ubuntu:     $ubuntuVer"
 Write-Host "  网络模式:   $netMode"
 Write-Host "  数据目录:   $dataDir"
 if ($proxy) { Write-Host "  代理:       $proxy" }
+if ($aptMirror) { Write-Host "  APT 镜像:   $aptMirror" }
 Write-Host ''
 
 if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?' -Config $cfg)) {
@@ -168,6 +170,40 @@ if ($proxy) {
     $rendered = $rendered.Replace("set -euo pipefail", "set -euo pipefail`n      [ -f /etc/profile.d/proxy.sh ] && source /etc/profile.d/proxy.sh")
     [System.IO.File]::WriteAllText($userDataYaml, $rendered, [System.Text.UTF8Encoding]::new($false))
     Write-LogOk '代理已注入 cloud-init'
+}
+
+# Inject APT mirror into cloud-init if configured
+if ($aptMirror) {
+    $mirrorUbuntuUrl = ''
+    $mirrorDockerUrl = ''
+    switch ($aptMirror) {
+        'ustc'     { $mirrorUbuntuUrl = 'https://mirrors.ustc.edu.cn/ubuntu/';                   $mirrorDockerUrl = 'https://mirrors.ustc.edu.cn/docker-ce/linux/ubuntu' }
+        'tsinghua' { $mirrorUbuntuUrl = 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu/';           $mirrorDockerUrl = 'https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu' }
+        'aliyun'   { $mirrorUbuntuUrl = 'https://mirrors.aliyun.com/ubuntu/';                     $mirrorDockerUrl = 'https://mirrors.aliyun.com/docker-ce/linux/ubuntu' }
+        'huawei'   { $mirrorUbuntuUrl = 'https://repo.huaweicloud.com/ubuntu/';                   $mirrorDockerUrl = 'https://repo.huaweicloud.com/docker-ce/linux/ubuntu' }
+        default {
+            if ($aptMirror -match '^https?://') {
+                $mirrorUbuntuUrl = $aptMirror.TrimEnd('/') + '/'
+            } else {
+                Write-LogWarn "未知的 APT_MIRROR 值: $aptMirror，跳过镜像注入"
+            }
+        }
+    }
+    if ($mirrorUbuntuUrl) {
+        Write-LogInfo "注入 APT 镜像源: $aptMirror"
+        $mirrorBlock = "apt:`n  primary:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl`n  security:`n    - arches: [default]`n      uri: $mirrorUbuntuUrl`n"
+        if ($rendered -match '(?m)^apt:') {
+            $rendered = $rendered -replace '(?m)^apt:', "${mirrorBlock}apt_merged:"
+            $rendered = $rendered -replace 'apt_merged:', 'apt:'
+        } else {
+            $rendered = $rendered.Replace("package_update: true", "${mirrorBlock}package_update: true")
+        }
+        if ($mirrorDockerUrl) {
+            $rendered = $rendered.Replace('https://download.docker.com/linux/ubuntu', $mirrorDockerUrl)
+        }
+        [System.IO.File]::WriteAllText($userDataYaml, $rendered, [System.Text.UTF8Encoding]::new($false))
+        Write-LogOk 'APT 镜像源已注入 cloud-init'
+    }
 }
 
 # 验证 user-data 中包含 SSH 公钥

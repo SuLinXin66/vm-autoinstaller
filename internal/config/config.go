@@ -61,6 +61,7 @@ var KnownKeys = map[string]KeyMeta{
 	"AUTO_YES":               {Description: "跳过确认提示", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultAutoYes},
 	"ENFORCE_RESOURCE_LIMIT": {Description: "强制资源下限", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultEnforceResourceLimit},
 	"PROXY":                  {Description: "VM 代理地址 (如 http://host:port)", EffectLevel: LevelNone, Type: TypeString},
+	"APT_MIRROR":             {Description: "APT 镜像源 (ustc/tsinghua/aliyun/huawei 或 URL)", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultAPTMirror},
 }
 
 func init() {
