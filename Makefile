@@ -20,7 +20,9 @@ LDFLAGS  := -s -w \
   -X '$(MODULE)/internal/buildinfo.DefaultAutoYes=$(DEFAULT_AUTO_YES)' \
   -X '$(MODULE)/internal/buildinfo.DefaultEnforceResourceLimit=$(DEFAULT_ENFORCE_RESOURCE_LIMIT)' \
   -X '$(MODULE)/internal/buildinfo.DefaultBuiltinShares=$(DEFAULT_BUILTIN_SHARES)' \
-  -X '$(MODULE)/internal/buildinfo.DefaultAPTMirror=$(DEFAULT_APT_MIRROR)'
+  -X '$(MODULE)/internal/buildinfo.DefaultAPTMirror=$(DEFAULT_APT_MIRROR)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultCNMode=$(DEFAULT_CN_MODE)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultGitHubProxy=$(DEFAULT_GITHUB_PROXY)'
 
 PLATFORMS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 DIST      := dist
@@ -67,6 +69,8 @@ installer: cli
 			-e 's|^UBUNTU_IMAGE_BASE_URL=.*|UBUNTU_IMAGE_BASE_URL="$(DEFAULT_UBUNTU_IMAGE_BASE_URL)"|' \
 			-e 's|^AUTO_YES=.*|AUTO_YES=$(DEFAULT_AUTO_YES)|' \
 			-e 's|^APT_MIRROR=.*|APT_MIRROR=$(DEFAULT_APT_MIRROR)|' \
+			-e 's|^CN_MODE=.*|CN_MODE=$(DEFAULT_CN_MODE)|' \
+			-e 's|^GITHUB_PROXY=.*|GITHUB_PROXY=$(DEFAULT_GITHUB_PROXY)|' \
 			"$$staging/vm/config.env.example"; \
 		cp "$(DIST)/cli/$${os}_$${arch}/$(APP_NAME)$$ext" "$$staging/_cli/$(APP_NAME)$$ext"; \
 		echo "  BUILD  installer $$os/$$arch"; \

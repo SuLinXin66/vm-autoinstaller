@@ -44,6 +44,13 @@ $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env
 $imgBase = Get-ConfigValue -Config $cfg -Key 'UBUNTU_IMAGE_BASE_URL' -Default 'https://cloud-images.ubuntu.com/releases'
 $proxy = Get-ConfigValue -Config $cfg -Key 'PROXY' -Default ''
 $aptMirror = Get-ConfigValue -Config $cfg -Key 'APT_MIRROR' -Default ''
+$cnMode = Get-ConfigValue -Config $cfg -Key 'CN_MODE' -Default '0'
+$githubProxy = Get-ConfigValue -Config $cfg -Key 'GITHUB_PROXY' -Default ''
+
+# CN_MODE 联动：如果未显式设置 APT_MIRROR，自动使用 ustc
+if ($cnMode -eq '1' -and -not $aptMirror) {
+    $aptMirror = 'ustc'
+}
 
 $cloudArch = 'amd64'
 $imageName = "ubuntu-${ubuntuVer}-server-cloudimg-${cloudArch}.img"

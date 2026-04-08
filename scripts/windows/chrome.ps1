@@ -40,15 +40,15 @@ $scpExe = (Get-Command scp.exe -ErrorAction Stop).Source
 $baseArgs = (Get-SshBaseArgs) + @('-p', "$vmPort")
 $scpBaseArgs = (Get-SshBaseArgs) + @('-P', "$vmPort")
 
-# 同步 Chrome 书签策略文件到 VM
+# 同步 Chrome/Chromium 书签策略文件到 VM（两个路径都写，兼容所有安装方式）
 $bookmarksJson = Join-Path $VMDir 'config\chrome-bookmarks.json'
 if (Test-Path -LiteralPath $bookmarksJson) {
     Write-LogInfo '同步 Chrome 书签...'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
-    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mkdir -p /etc/opt/chrome/policies/managed' 2>&1
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed' 2>&1
     $null = & $scpExe @scpBaseArgs $bookmarksJson "${vmUser}@${vmHost}:/tmp/bookmarks.json" 2>&1
-    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mv /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json' 2>&1
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo cp /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo cp /tmp/bookmarks.json /etc/chromium/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json && rm -f /tmp/bookmarks.json' 2>&1
     $ErrorActionPreference = $prevEAP
     if ($LASTEXITCODE -eq 0) { Write-LogOk '书签已同步' } else { Write-LogWarn '书签同步失败，继续启动' }
 }
@@ -80,6 +80,42 @@ if (-not $vcxsrv) {
     }
 }
 
+# 自动检测浏览器：Chrome → chromium-browser → chromium (snap) → Flatpak Chromium
+$browserBin = 'google-chrome-stable'
+$browserFlags = '--no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN'
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
+$checkOut = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'command -v google-chrome-stable' 2>&1
+$ErrorActionPreference = $prevEAP
+if ($LASTEXITCODE -ne 0) {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $checkOut = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'command -v chromium-browser' 2>&1
+    $ErrorActionPreference = $prevEAP
+    if ($LASTEXITCODE -eq 0) {
+        $browserBin = 'chromium-browser'
+    } else {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'SilentlyContinue'
+        $checkOut = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'command -v chromium || snap list chromium' 2>&1
+        $ErrorActionPreference = $prevEAP
+        if ($LASTEXITCODE -eq 0) {
+            $browserBin = 'chromium'
+        } else {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $checkOut = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'flatpak list 2>/dev/null | grep -q org.chromium.Chromium' 2>&1
+            $ErrorActionPreference = $prevEAP
+            if ($LASTEXITCODE -eq 0) {
+                $browserBin = 'flatpak run org.chromium.Chromium'
+            }
+        }
+    }
+    if ($browserBin -ne 'google-chrome-stable') {
+        Write-LogInfo "使用 Chromium 浏览器 ($browserBin)"
+    }
+}
+
 if ($vcxsrv) {
     Write-LogInfo "使用 VcXsrv: $vcxsrv"
     $running = Get-Process -Name 'vcxsrv' -ErrorAction SilentlyContinue
@@ -88,12 +124,12 @@ if ($vcxsrv) {
         Start-Sleep -Seconds 2
     }
     $env:DISPLAY = 'localhost:0.0'
-    Write-LogInfo "通过 X11 转发启动 Chrome (DISPLAY=$($env:DISPLAY))..."
+    Write-LogInfo "通过 X11 转发启动浏览器 (DISPLAY=$($env:DISPLAY))..."
     $xArgs = (Get-SshBaseArgs) + @(
         '-Y',
         '-p', "$vmPort",
         "${vmUser}@${vmHost}",
-        'LANGUAGE=zh_CN LANG=zh_CN.UTF-8 google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN'
+        "LANGUAGE=zh_CN LANG=zh_CN.UTF-8 $browserBin $browserFlags"
     )
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -104,7 +140,7 @@ if ($vcxsrv) {
 
 # --- 回退：xpra HTML5（需在客户机已安装 xpra，可由扩展脚本安装）---
 Write-LogWarn 'VcXsrv 不可用，改用 xpra HTML5（浏览器打开）...'
-$bashOneLiner = 'export LANGUAGE=zh_CN LANG=zh_CN.UTF-8; xpra stop :100 2>/dev/null || true; nohup xpra start :100 --bind-tcp=0.0.0.0:10000 --start-child="google-chrome-stable --no-sandbox --disable-gpu --lang=zh-CN" --html5=on --daemon=yes </dev/null >/tmp/xpra-chrome.log 2>&1 & echo ok'
+$bashOneLiner = "export LANGUAGE=zh_CN LANG=zh_CN.UTF-8; xpra stop :100 2>/dev/null || true; nohup xpra start :100 --bind-tcp=0.0.0.0:10000 --start-child=`"$browserBin $browserFlags`" --html5=on --daemon=yes </dev/null >/tmp/xpra-chrome.log 2>&1 & echo ok"
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'

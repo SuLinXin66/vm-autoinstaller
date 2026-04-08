@@ -5,6 +5,9 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+source /opt/kvm-extensions/lib/net.sh
+net::init_proxy
+
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 
 VM_USER="${VM_USER:-$(getent passwd 1000 | cut -d: -f1)}"
@@ -18,9 +21,7 @@ apt-get install -y -q curl ca-certificates git
 
 sudo -u "$VM_USER" mkdir -p "$LOCAL_BIN"
 
-# ── 解析 latest 版本号（与 lazygit/yazi 扩展一致：用 Location 头，避免 GitHub API 未认证 403 + curl -f 直接失败）──
-ASDF_VER="$(curl -fsSI --connect-timeout 15 https://github.com/asdf-vm/asdf/releases/latest 2>/dev/null \
-    | grep -i '^location:' | sed -E 's|.*/v([^[:space:]]+).*|\1|' | tr -d '\r')"
+ASDF_VER="$(net::ghlatest "$(net::ghurl "https://github.com/asdf-vm/asdf/releases/latest")")"
 if [[ -z "$ASDF_VER" ]]; then
     echo "  警告: 无法从 releases/latest 解析版本，使用 0.18.1"
     ASDF_VER="0.18.1"
@@ -35,12 +36,12 @@ case "$ARCH" in
 esac
 
 ASDF_TGZ="asdf-v${ASDF_VER}-linux-${ASDF_ARCH}.tar.gz"
-ASDF_URL="https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VER}/${ASDF_TGZ}"
+ASDF_URL="$(net::ghurl "https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VER}/${ASDF_TGZ}")"
 
 echo "[1/4] 下载 ${ASDF_TGZ} ..."
 _tmp="$(mktemp -d)"
 trap 'rm -rf "$_tmp"' EXIT
-if ! curl -fsSL --connect-timeout 30 "$ASDF_URL" -o "${_tmp}/asdf.tgz"; then
+if ! net::download "$ASDF_URL" "${_tmp}/asdf.tgz"; then
     echo "  错误: 下载失败: $ASDF_URL"
     exit 1
 fi

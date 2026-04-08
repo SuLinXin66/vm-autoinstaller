@@ -34,6 +34,13 @@ DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 UBUNTU_IMAGE_BASE_URL="${UBUNTU_IMAGE_BASE_URL:-https://cloud-images.ubuntu.com/releases}"
 PROXY="${PROXY:-}"
 APT_MIRROR="${APT_MIRROR:-}"
+CN_MODE="${CN_MODE:-0}"
+GITHUB_PROXY="${GITHUB_PROXY:-}"
+
+# CN_MODE 联动：如果未显式设置 APT_MIRROR，自动使用 ustc
+if [[ "$CN_MODE" == "1" && -z "$APT_MIRROR" ]]; then
+    APT_MIRROR="ustc"
+fi
 
 # --- Derived paths ---
 ARCH="$(uname -m)"

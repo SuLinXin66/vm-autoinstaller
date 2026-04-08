@@ -67,7 +67,7 @@ _chrome::install_xpra_from_official() {
     case "$family" in
         debian)
             log::info "添加 xpra.org 官方 APT 源..."
-            sudo::exec bash -c 'curl -fsSL https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc'
+            sudo::exec bash -c 'curl -fsSL --retry 3 --retry-delay 3 https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc'
             local codename arch
             codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
             arch="$(dpkg --print-architecture)"
@@ -258,14 +258,18 @@ if [[ ! -f "$SSH_KEY_PATH" ]]; then
     log::die "SSH 密钥不存在: ${SSH_KEY_PATH}，请先运行 ${APP_NAME} setup"
 fi
 
-# 同步 Chrome 书签策略文件到 VM
+# 同步 Chrome/Chromium 书签策略文件到 VM（两个路径都写，兼容所有安装方式）
 _BOOKMARKS_JSON="${REPO_ROOT}/vm/config/chrome-bookmarks.json"
 if [[ -f "$_BOOKMARKS_JSON" ]]; then
     log::info "同步 Chrome 书签..."
     _ssh_opts=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
-    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mkdir -p /etc/opt/chrome/policies/managed" 2>/dev/null || true
+    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed" 2>/dev/null || true
     scp "${_ssh_opts[@]}" "$_BOOKMARKS_JSON" "${VM_USER}@${ip}:/tmp/bookmarks.json" 2>/dev/null \
-        && ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mv /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json" 2>/dev/null \
+        && ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" \
+            "sudo cp /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json \
+             && sudo cp /tmp/bookmarks.json /etc/chromium/policies/managed/bookmarks.json \
+             && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json \
+             && rm -f /tmp/bookmarks.json" 2>/dev/null \
         && log::ok "书签已同步" \
         || log::warn "书签同步失败，继续启动"
 fi
@@ -282,8 +286,21 @@ log::info "Chrome 窗口将无缝出现在宿主机桌面上"
 # 构建 SSH 参数（用于 Xpra 内部的 SSH 连接）
 SSH_OPTS="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-# Chrome 启动参数
-CHROME_CMD="google-chrome-stable --no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN"
+# 自动检测浏览器：Chrome → chromium-browser → chromium (snap) → Flatpak Chromium
+_ssh_opts_detect=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
+_browser="google-chrome-stable"
+_browser_flags="--no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN"
+if ! ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "command -v google-chrome-stable" &>/dev/null; then
+    if ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "command -v chromium-browser" &>/dev/null; then
+        _browser="chromium-browser"
+    elif ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "command -v chromium || snap list chromium" &>/dev/null; then
+        _browser="chromium"
+    elif ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "flatpak list 2>/dev/null | grep -q org.chromium.Chromium" &>/dev/null; then
+        _browser="flatpak run org.chromium.Chromium"
+    fi
+    [[ "$_browser" != "google-chrome-stable" ]] && log::info "使用 Chromium 浏览器 ($_browser)"
+fi
+CHROME_CMD="${_browser} ${_browser_flags}"
 
 # Xpra seamless 模式：启动远程 Chrome 并直接转发窗口到宿主机
 # --clipboard=yes --clipboard-direction=both：启用双向剪贴板同步

@@ -45,9 +45,9 @@ utils::download() {
     local rc=0
 
     if utils::check_command wget; then
-        wget -q --show-progress -O "$tmp" "$url" || rc=$?
+        wget -q --show-progress --tries=3 -c -O "$tmp" "$url" || rc=$?
     elif utils::check_command curl; then
-        curl -fL --progress-bar -o "$tmp" "$url" || rc=$?
+        curl -fL -C - --retry 3 --retry-delay 3 --progress-bar -o "$tmp" "$url" || rc=$?
     else
         log::die "wget 和 curl 均不可用"
     fi

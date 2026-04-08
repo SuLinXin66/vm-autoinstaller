@@ -62,6 +62,8 @@ var KnownKeys = map[string]KeyMeta{
 	"ENFORCE_RESOURCE_LIMIT": {Description: "强制资源下限", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultEnforceResourceLimit},
 	"PROXY":                  {Description: "VM 代理地址 (如 http://host:port)", EffectLevel: LevelNone, Type: TypeString},
 	"APT_MIRROR":             {Description: "APT 镜像源 (ustc/tsinghua/aliyun/huawei 或 URL)", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultAPTMirror},
+	"CN_MODE":                {Description: "国内模式 (1=自动使用国内镜像/加速站)", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultCNMode},
+	"GITHUB_PROXY":           {Description: "GitHub 加速前缀 (如 https://ghfast.top/)", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultGitHubProxy},
 }
 
 func init() {

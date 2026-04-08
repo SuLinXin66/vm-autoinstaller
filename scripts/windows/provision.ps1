@@ -17,6 +17,8 @@ $vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
 $vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'
 $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
+$cnMode = Get-ConfigValue -Config $cfg -Key 'CN_MODE' -Default '0'
+$githubProxy = Get-ConfigValue -Config $cfg -Key 'GITHUB_PROXY' -Default ''
 
 $extDir = Join-Path $VMDir 'extensions'
 $remoteDir = '/opt/kvm-extensions/scripts'
@@ -63,9 +65,29 @@ Write-LogBanner -Title '执行 VM 扩展模块'
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'
-$null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "sudo mkdir -p $remoteDir" 2>&1
+$null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "sudo mkdir -p $remoteDir $markerDir/lib" 2>&1
 $ErrorActionPreference = $prevEAP
 if ($LASTEXITCODE -ne 0) { throw '无法在 VM 上创建扩展目录' }
+
+# 传输 VM 侧公共 lib
+$libDir = Join-Path $VMDir 'lib'
+if (Test-Path -LiteralPath $libDir) {
+    $libFiles = Get-ChildItem -LiteralPath $libDir -Filter '*.sh' -File -ErrorAction SilentlyContinue
+    if ($libFiles -and $libFiles.Count -gt 0) {
+        Write-LogInfo '传输公共 lib 到 VM...'
+        foreach ($lf in $libFiles) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $null = & $scpExe @scpBaseArgs $lf.FullName "${vmUser}@${vmHost}:/tmp/" 2>&1
+            $ErrorActionPreference = $prevEAP
+            if ($LASTEXITCODE -ne 0) { Write-LogWarn "SCP lib 失败: $($lf.Name)"; continue }
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "sudo mv /tmp/$($lf.Name) $markerDir/lib/ && sudo chmod +x $markerDir/lib/$($lf.Name)" 2>&1
+            $ErrorActionPreference = $prevEAP
+        }
+    }
+}
 
 Write-LogInfo '传输扩展脚本到 VM...'
 foreach ($f in $scripts) {
@@ -106,7 +128,7 @@ foreach ($f in $scripts) {
     }
 
     Write-LogInfo "执行扩展: $short..."
-    $runCmd = "sudo VM_USER='$vmUser' bash $remoteDir/$baseName"
+    $runCmd = "sudo CN_MODE='$cnMode' GITHUB_PROXY='$githubProxy' VM_USER='$vmUser' bash $remoteDir/$baseName"
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $sshExe @baseArgs "${vmUser}@${vmHost}" $runCmd 2>&1 | ForEach-Object { Write-Host $_ }

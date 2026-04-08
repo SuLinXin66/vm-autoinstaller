@@ -29,16 +29,27 @@ EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 echo "[${EXTENSION_NAME}] 开始安装..."
 
 # ============================================================
-# 在此编写安装逻辑，例如：
+# 如需从网络下载文件或克隆 GitHub 仓库，推荐使用公共网络库：
+#
+#   source /opt/kvm-extensions/lib/net.sh
+#   net::init_proxy
+#
+# 可用函数：
+#   net::download <url> <output>       — curl 下载（自动重试 + 断点续传）
+#   net::ghurl <github_url>            — 为 GitHub URL 添加加速前缀
+#   net::ghlatest <releases_url>       — 解析 GitHub releases/latest 版本号
+#   net::ghclone <url> <dest> [user]   — git clone（HTTP/1.1 + 重试）
+#
+# 示例：
+#
+#   net::download "https://example.com/app.deb" /tmp/app.deb
+#   dpkg -i /tmp/app.deb || apt-get install -f -y
+#   rm -f /tmp/app.deb
+#
+# 或直接用 apt：
 #
 #   apt-get update -qq
 #   apt-get install -y -qq your-package
-#
-# 或安装 .deb 包：
-#
-#   curl -fsSL https://example.com/app.deb -o /tmp/app.deb
-#   dpkg -i /tmp/app.deb || apt-get install -f -y
-#   rm -f /tmp/app.deb
 #
 # ============================================================
 

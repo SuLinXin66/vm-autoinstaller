@@ -6,6 +6,9 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
+source /opt/kvm-extensions/lib/net.sh
+net::init_proxy
+
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 
 VM_USER="${VM_USER:-$(getent passwd 1000 | cut -d: -f1)}"
@@ -21,30 +24,50 @@ apt-get install -y -q \
     zsh fzf git curl unzip \
     ripgrep fd-find \
     luarocks gcc make \
-    python3-venv
+    python3-venv \
+    ncurses-term
 
 # fd-find 在 Ubuntu 上二进制名为 fdfind，创建 fd 软链接
 if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
     ln -s "$(command -v fdfind)" /usr/local/bin/fd
 fi
 
+# 现代终端 terminfo：ncurses-term 覆盖 alacritty/tmux/foot 等，
+# 以下为不在 ncurses-term 中的终端补充 terminfo（基于 xterm-256color）
+_modern_terms=(xterm-kitty xterm-ghostty)
+for _mt in "${_modern_terms[@]}"; do
+    if ! infocmp "$_mt" &>/dev/null 2>&1; then
+        printf '%s|%s terminal,\n\tuse=xterm-256color,\n' "$_mt" "$_mt" | tic -x - 2>/dev/null || true
+    fi
+done
+
 # neovim: apt 版本过旧（< 0.10），LazyVim 需要 >= 0.10，从 GitHub Release 安装
 echo "  安装 neovim（GitHub Release）..."
 if ! nvim --version 2>/dev/null | head -1 | grep -qE 'v0\.(1[0-9]|[2-9][0-9])'; then
     _nvim_arch="x86_64"
     [[ "$ARCH" == "arm64" ]] && _nvim_arch="aarch64"
-    curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${_nvim_arch}.tar.gz" \
-        | tar xz -C /opt/
-    ln -sf "/opt/nvim-linux-${_nvim_arch}/bin/nvim" /usr/local/bin/nvim
+    _tmp_nvim="$(mktemp)"
+    if net::download "$(net::ghurl "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${_nvim_arch}.tar.gz")" "$_tmp_nvim"; then
+        tar xzf "$_tmp_nvim" -C /opt/
+        ln -sf "/opt/nvim-linux-${_nvim_arch}/bin/nvim" /usr/local/bin/nvim
+    else
+        echo "  警告: neovim 下载失败"
+    fi
+    rm -f "$_tmp_nvim"
 fi
 
 # eza（Ubuntu 24.04 universe）
 if ! command -v eza &>/dev/null; then
     apt-get install -y -q eza 2>/dev/null || {
         echo "  eza 不在默认仓库，通过 cargo-binstall 安装..."
-        curl -fsSL https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz \
-            | tar xz -C /usr/local/bin/
-        cargo-binstall --no-confirm eza 2>/dev/null || echo "  警告: eza 安装失败，ls alias 将不可用"
+        _tmp_cb="$(mktemp)"
+        if net::download "$(net::ghurl "https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz")" "$_tmp_cb"; then
+            tar xzf "$_tmp_cb" -C /usr/local/bin/
+            cargo-binstall --no-confirm eza 2>/dev/null || echo "  警告: eza 安装失败，ls alias 将不可用"
+        else
+            echo "  警告: cargo-binstall 下载失败"
+        fi
+        rm -f "$_tmp_cb"
     }
 fi
 
@@ -61,14 +84,19 @@ fi
 # ── 2. lazygit（GitHub Release） ───────────────────────────
 echo "[2/10] 安装 lazygit..."
 if ! command -v lazygit &>/dev/null; then
-    LAZYGIT_VERSION="$(curl -fsSI https://github.com/jesseduffield/lazygit/releases/latest 2>/dev/null | grep -i '^location:' | sed -E 's|.*/v([^[:space:]]+).*|\1|')"
+    LAZYGIT_VERSION="$(net::ghlatest "$(net::ghurl "https://github.com/jesseduffield/lazygit/releases/latest")")"
     if [[ -n "$LAZYGIT_VERSION" ]]; then
         _lg_arch="$ARCH"
         [[ "$_lg_arch" == "amd64" ]] && _lg_arch="x86_64"
         [[ "$_lg_arch" == "arm64" ]] && _lg_arch="arm64"
-        curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_Linux_${_lg_arch}.tar.gz" \
-            | tar xz -C /usr/local/bin lazygit
-        echo "  lazygit ${LAZYGIT_VERSION} 已安装"
+        _tmp_lg="$(mktemp)"
+        if net::download "$(net::ghurl "https://github.com/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_Linux_${_lg_arch}.tar.gz")" "$_tmp_lg"; then
+            tar xzf "$_tmp_lg" -C /usr/local/bin lazygit
+            echo "  lazygit ${LAZYGIT_VERSION} 已安装"
+        else
+            echo "  警告: lazygit 下载失败"
+        fi
+        rm -f "$_tmp_lg"
     else
         echo "  警告: 无法获取 lazygit 最新版本号"
     fi
@@ -77,18 +105,20 @@ fi
 # ── 3. yazi（GitHub Release） ──────────────────────────────
 echo "[3/10] 安装 yazi..."
 if ! command -v yazi &>/dev/null; then
-    YAZI_VERSION="$(curl -fsSI https://github.com/sxyazi/yazi/releases/latest 2>/dev/null | grep -i '^location:' | sed -E 's|.*/v([^[:space:]]+).*|\1|')"
+    YAZI_VERSION="$(net::ghlatest "$(net::ghurl "https://github.com/sxyazi/yazi/releases/latest")")"
     if [[ -n "$YAZI_VERSION" ]]; then
         _yazi_arch="x86_64"
         [[ "$ARCH" == "arm64" ]] && _yazi_arch="aarch64"
-        _yazi_url="https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-${_yazi_arch}-unknown-linux-musl.zip"
         _tmp_yazi="$(mktemp -d)"
-        curl -fsSL "$_yazi_url" -o "${_tmp_yazi}/yazi.zip"
-        unzip -q "${_tmp_yazi}/yazi.zip" -d "$_tmp_yazi"
-        install -m 755 "${_tmp_yazi}"/yazi-*/yazi /usr/local/bin/yazi
-        install -m 755 "${_tmp_yazi}"/yazi-*/ya /usr/local/bin/ya 2>/dev/null || true
+        if net::download "$(net::ghurl "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-${_yazi_arch}-unknown-linux-musl.zip")" "${_tmp_yazi}/yazi.zip"; then
+            unzip -q "${_tmp_yazi}/yazi.zip" -d "$_tmp_yazi"
+            install -m 755 "${_tmp_yazi}"/yazi-*/yazi /usr/local/bin/yazi
+            install -m 755 "${_tmp_yazi}"/yazi-*/ya /usr/local/bin/ya 2>/dev/null || true
+            echo "  yazi ${YAZI_VERSION} 已安装"
+        else
+            echo "  警告: yazi 下载失败"
+        fi
         rm -rf "$_tmp_yazi"
-        echo "  yazi ${YAZI_VERSION} 已安装"
     else
         echo "  警告: 无法获取 yazi 最新版本号"
     fi
@@ -98,9 +128,13 @@ fi
 echo "[4/10] 安装 oh-my-zsh..."
 OMZ_DIR="${USER_HOME}/.oh-my-zsh"
 if [[ ! -d "$OMZ_DIR" ]]; then
-    sudo -u "$VM_USER" bash -c \
-        'export RUNZSH=no CHSH=no; curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | bash' \
-        || true
+    # 直接 clone（而非 curl|bash），完全控制 git 操作的代理和重试
+    if net::ghclone "$(net::ghurl "https://github.com/ohmyzsh/ohmyzsh.git")" "$OMZ_DIR" "$VM_USER"; then
+        # 复制模板 .zshrc（与官方安装脚本行为一致）
+        if [[ -f "${OMZ_DIR}/templates/zshrc.zsh-template" && ! -f "${USER_HOME}/.zshrc" ]]; then
+            sudo -u "$VM_USER" cp "${OMZ_DIR}/templates/zshrc.zsh-template" "${USER_HOME}/.zshrc"
+        fi
+    fi
 fi
 
 # ── 5. oh-my-zsh 第三方插件 ────────────────────────────────
@@ -110,21 +144,24 @@ ZSH_CUSTOM="${OMZ_DIR}/custom"
 _clone_plugin() {
     local repo="$1" dest="${ZSH_CUSTOM}/plugins/$2"
     if [[ ! -d "$dest" ]]; then
-        sudo -u "$VM_USER" git clone --depth 1 "$repo" "$dest"
+        net::ghclone "$repo" "$dest" "$VM_USER" || true
     fi
 }
 
-_clone_plugin "https://github.com/zsh-users/zsh-autosuggestions.git" "zsh-autosuggestions"
-_clone_plugin "https://github.com/zdharma-continuum/fast-syntax-highlighting.git" "fast-syntax-highlighting"
+_clone_plugin "$(net::ghurl "https://github.com/zsh-users/zsh-autosuggestions.git")" "zsh-autosuggestions"
+_clone_plugin "$(net::ghurl "https://github.com/zdharma-continuum/fast-syntax-highlighting.git")" "fast-syntax-highlighting"
 
 # ── 6. oh-my-posh ─────────────────────────────────────────
 echo "[6/10] 安装 oh-my-posh..."
 _POSH_BIN="${USER_HOME}/.local/bin/oh-my-posh"
 if [[ ! -x "$_POSH_BIN" ]]; then
-    # 显式设置 HOME 确保安装到用户目录，而非 root 的 HOME
-    sudo -u "$VM_USER" bash -c \
-        "export HOME='${USER_HOME}'; mkdir -p '${USER_HOME}/.local/bin'; curl -fsSL https://ohmyposh.dev/install.sh | bash -s -- -d '${USER_HOME}/.local/bin'" \
-        || true
+    _posh_script="$(mktemp)"
+    if net::download "https://ohmyposh.dev/install.sh" "$_posh_script"; then
+        sudo -u "$VM_USER" bash -c \
+            "export HOME='${USER_HOME}'; mkdir -p '${USER_HOME}/.local/bin'; bash '${_posh_script}' -d '${USER_HOME}/.local/bin'" \
+            || true
+    fi
+    rm -f "$_posh_script"
 fi
 
 # ── 7. neovim 配置 ────────────────────────────────────────
@@ -132,14 +169,25 @@ echo "[7/10] 克隆 neovim 配置..."
 NVIM_CONFIG="${USER_HOME}/.config/nvim"
 if [[ ! -d "$NVIM_CONFIG" ]]; then
     sudo -u "$VM_USER" mkdir -p "${USER_HOME}/.config"
-    sudo -u "$VM_USER" git clone https://github.com/SuLinXin66/nvim-config.git "$NVIM_CONFIG" || true
+    net::ghclone "$(net::ghurl "https://github.com/SuLinXin66/nvim-config.git")" "$NVIM_CONFIG" "$VM_USER" || true
 fi
 
-# ── 8. 确保 ~/.local/bin 在 PATH 中（oh-my-posh 安装在此）──
-echo "[8/10] 配置 PATH..."
+# ── 8. 确保 ~/.local/bin 在 PATH 中（oh-my-posh 安装在此）+ TERM 回退 ──
+echo "[8/10] 配置 PATH 及终端兼容性..."
 _PROFILE="${USER_HOME}/.profile"
 if ! grep -q '.local/bin' "$_PROFILE" 2>/dev/null; then
     sudo -u "$VM_USER" bash -c "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$_PROFILE'"
+fi
+
+_ZSHRC="${USER_HOME}/.zshrc"
+if ! grep -q 'TERM fallback' "$_ZSHRC" 2>/dev/null; then
+    _term_block='# TERM fallback: SSH 进入时宿主机终端类型（如 xterm-kitty）可能在 VM 中无 terminfo
+if ! infocmp "$TERM" &>/dev/null 2>&1; then
+    export TERM=xterm-256color
+fi
+'
+    _old="$(cat "$_ZSHRC")"
+    printf '%s\n%s' "$_term_block" "$_old" | sudo -u "$VM_USER" tee "$_ZSHRC" > /dev/null
 fi
 
 # ── 9. 设置默认 shell ─────────────────────────────────────

@@ -1091,6 +1091,26 @@ func cfgVal(cfg map[string]string, key string) string {
 	return ""
 }
 
+func isCNMode(cfg map[string]string) bool {
+	return cfgVal(cfg, "CN_MODE") == "1"
+}
+
+func cfgValCN(cfg map[string]string, key string) string {
+	if v := cfgVal(cfg, key); v != "" {
+		return v
+	}
+	if !isCNMode(cfg) {
+		return ""
+	}
+	switch key {
+	case "APT_MIRROR":
+		return "ustc"
+	case "GITHUB_PROXY":
+		return "https://ghfast.top/"
+	}
+	return ""
+}
+
 func ensureVMRunning() (map[string]string, error) {
 	cfg, err := loadConfig()
 	if err != nil {

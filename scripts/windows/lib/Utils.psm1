@@ -48,11 +48,11 @@ function Invoke-FileDownload {
     if ($curlExe) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $curlExe.Source -fSL --progress-bar -o $DestinationPath "$Uri"
+        & $curlExe.Source -fSL -C - --retry 3 --retry-delay 3 --progress-bar -o $DestinationPath "$Uri"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[WARN ] curl 首次下载失败（常见于吊销服务器不可达），使用 --ssl-no-revoke 重试..."
             Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
-            & $curlExe.Source -fSL --progress-bar --ssl-no-revoke -o $DestinationPath "$Uri"
+            & $curlExe.Source -fSL -C - --retry 3 --retry-delay 3 --progress-bar --ssl-no-revoke -o $DestinationPath "$Uri"
         }
         $ErrorActionPreference = $prevEAP
         if ($LASTEXITCODE -eq 0) {
@@ -64,13 +64,25 @@ function Invoke-FileDownload {
     }
 
     $progress = $ProgressPreference
-    try {
-        $ProgressPreference = 'Continue'
-        Invoke-WebRequest -Uri $Uri -OutFile $DestinationPath -UseBasicParsing
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            $ProgressPreference = 'Continue'
+            Invoke-WebRequest -Uri $Uri -OutFile $DestinationPath -UseBasicParsing
+            break
+        }
+        catch {
+            $ProgressPreference = $progress
+            Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
+            if ($attempt -lt $maxRetries) {
+                Write-Host "[WARN ] 下载失败，5 秒后重试 ($attempt/$maxRetries)..."
+                Start-Sleep -Seconds 5
+            } else {
+                throw
+            }
+        }
     }
-    finally {
-        $ProgressPreference = $progress
-    }
+    $ProgressPreference = $progress
     Write-Host "[OK   ] 下载完成: $desc"
 }
 

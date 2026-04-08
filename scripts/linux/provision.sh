@@ -20,6 +20,8 @@ VM_NAME="${VM_NAME:-ubuntu-server}"
 VM_USER="${VM_USER:-wpsweb}"
 DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 SSH_KEY_PATH="${DATA_DIR}/id_ed25519"
+CN_MODE="${CN_MODE:-0}"
+GITHUB_PROXY="${GITHUB_PROXY:-}"
 
 EXTENSIONS_DIR="${REPO_ROOT}/vm/extensions"
 REMOTE_DIR="/opt/kvm-extensions/scripts"
@@ -78,8 +80,19 @@ fi
 
 log::banner "执行 VM 扩展模块"
 
-# 在 VM 上创建脚本目录
-_provision::ssh_exec "$ip" "sudo mkdir -p ${REMOTE_DIR}"
+# 在 VM 上创建脚本目录和公共 lib 目录
+_provision::ssh_exec "$ip" "sudo mkdir -p ${REMOTE_DIR} ${MARKER_DIR}/lib"
+
+# 传输 VM 侧公共 lib
+LIB_DIR="${REPO_ROOT}/vm/lib"
+if [[ -d "$LIB_DIR" ]]; then
+    log::info "传输公共 lib 到 VM..."
+    for f in "${LIB_DIR}"/*.sh; do
+        [[ -f "$f" ]] || continue
+        _provision::scp_to "$ip" "$f" "/tmp/"
+        _provision::ssh_exec "$ip" "sudo mv /tmp/$(basename "$f") ${MARKER_DIR}/lib/ && sudo chmod +x ${MARKER_DIR}/lib/$(basename "$f")"
+    done
+fi
 
 # 批量传输扩展脚本到 VM
 log::info "传输扩展脚本到 VM..."
@@ -110,7 +123,7 @@ for ext in "${extensions[@]}"; do
 
     log::info "执行扩展: ${name}..."
 
-    if _provision::ssh_exec "$ip" "sudo VM_USER='${VM_USER}' bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
+    if _provision::ssh_exec "$ip" "sudo CN_MODE='${CN_MODE}' GITHUB_PROXY='${GITHUB_PROXY}' VM_USER='${VM_USER}' bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
         echo "${local_hash}" | _provision::ssh_exec "$ip" "sudo tee '${MARKER_DIR}/${name}.done' > /dev/null"
         (( ++succeeded )) || true
     else

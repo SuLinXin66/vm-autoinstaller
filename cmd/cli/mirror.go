@@ -156,7 +156,7 @@ func showMirror() error {
 		return nil
 	}
 
-	mirror := cfgVal(cfg, "APT_MIRROR")
+	mirror := cfgValCN(cfg, "APT_MIRROR")
 	if mirror == "" {
 		fmt.Println("当前使用官方源。")
 		fmt.Printf("使用 %s mirror set <名称|URL> 设置国内镜像源。\n", buildinfo.AppName)
@@ -233,7 +233,7 @@ func ensureMirror() {
 	if err != nil {
 		return
 	}
-	mirror := cfgVal(cfg, "APT_MIRROR")
+	mirror := cfgValCN(cfg, "APT_MIRROR")
 	if mirror == "" {
 		return
 	}

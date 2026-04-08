@@ -19,4 +19,6 @@ var (
 	DefaultEnforceResourceLimit = "1"
 	DefaultBuiltinShares        = ""
 	DefaultAPTMirror            = ""
+	DefaultCNMode               = "0"
+	DefaultGitHubProxy          = ""
 )
