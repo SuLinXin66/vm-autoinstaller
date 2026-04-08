@@ -19,6 +19,7 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/meta"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/share"
 )
 
 //go:embed all:staging
@@ -132,6 +133,35 @@ func run() error {
 		return fmt.Errorf("写入 meta 失败: %v", err)
 	}
 	fmt.Println("  ✓ 完成")
+
+	// Reconcile resources: user values below build.env defaults → reset
+	reconcileResources()
+
+	// Reconcile builtin shares
+	if buildinfo.DefaultBuiltinShares != "" {
+		fmt.Println()
+		fmt.Println("内置共享目录对账:")
+		vmUser := getDefault("VM_USER", buildinfo.DefaultVMUser)
+		res, err := share.ReconcileBuiltinShares(buildinfo.DefaultBuiltinShares, vmUser, true)
+		if err != nil {
+			return fmt.Errorf("内置共享目录对账失败: %v", err)
+		}
+		for _, a := range res.Added {
+			color.Green.Printf("  + 新增: %s\n", a)
+		}
+		for _, u := range res.Updated {
+			color.Yellow.Printf("  ~ 更新: %s\n", u)
+		}
+		for _, r := range res.Restored {
+			color.Yellow.Printf("  ↻ 恢复: %s\n", r)
+		}
+		for _, d := range res.Removed {
+			color.Gray.Printf("  - 移除旧版: %s\n", d)
+		}
+		if !res.HasChanges() {
+			fmt.Println("  ✓ 已对齐，无需变更")
+		}
+	}
 
 	fmt.Println()
 	fmt.Printf("✓ %s 安装完成！\n", buildinfo.AppName)
@@ -326,6 +356,48 @@ func checkResources() error {
 		return fmt.Errorf("宿主机资源不满足 VM 配置要求，请升级硬件")
 	}
 	return nil
+}
+
+func reconcileResources() {
+	cfgPath := paths.ConfigEnvPath()
+	cfg, err := config.ReadEnv(cfgPath)
+	if err != nil {
+		return
+	}
+
+	type resItem struct {
+		Key      string
+		Default  string
+		Unit     string
+	}
+	items := []resItem{
+		{"VM_CPUS", buildinfo.DefaultVMCPUs, "核"},
+		{"VM_MEMORY", buildinfo.DefaultVMMemory, "MB"},
+		{"VM_DISK_SIZE", buildinfo.DefaultVMDiskSize, "GB"},
+	}
+
+	for _, item := range items {
+		minVal, _ := strconv.Atoi(item.Default)
+		if minVal <= 0 {
+			continue
+		}
+		userStr, exists := cfg[item.Key]
+		if !exists || userStr == "" {
+			_ = config.WriteValue(cfgPath, item.Key, item.Default)
+			color.Yellow.Printf("  ⚠ %s 未设置，已初始化为默认值 %s %s\n", item.Key, item.Default, item.Unit)
+			continue
+		}
+		userVal, _ := strconv.Atoi(userStr)
+		if item.Key == "VM_CPUS" && userVal == 0 {
+			continue // 0=auto, always valid
+		}
+		if userVal >= minVal {
+			continue
+		}
+		_ = config.WriteValue(cfgPath, item.Key, item.Default)
+		color.Yellow.Printf("  ⚠ %s (%s %s) 低于默认最低要求 (%d %s)，已重置为 %s\n",
+			item.Key, userStr, item.Unit, minVal, item.Unit, item.Default)
+	}
 }
 
 func getDefault(key, fallback string) string {

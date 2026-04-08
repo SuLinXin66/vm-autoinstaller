@@ -106,7 +106,7 @@ foreach ($f in $scripts) {
     }
 
     Write-LogInfo "执行扩展: $short..."
-    $runCmd = "sudo bash $remoteDir/$baseName"
+    $runCmd = "sudo VM_USER='$vmUser' bash $remoteDir/$baseName"
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $sshExe @baseArgs "${vmUser}@${vmHost}" $runCmd 2>&1 | ForEach-Object { Write-Host $_ }

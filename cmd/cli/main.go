@@ -21,6 +21,7 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/runner"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/share"
 )
 
 func main() {
@@ -41,6 +42,9 @@ func newRootCmd() *cobra.Command {
 		Use:     buildinfo.AppName,
 		Short:   "KVM/VirtualBox Ubuntu VM 管理工具",
 		Version: buildinfo.Version,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			checkAlignment()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSSH()
 		},
@@ -66,6 +70,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(),
 		newInfoCmd(),
 		newShareCmd(),
+		newProxyCmd(),
 		newSyncCmd(),
 		newUpgradeCmd(),
 		newUninstallCmd(),
@@ -169,7 +174,9 @@ func newSetupCmd() *cobra.Command {
 				return err
 			}
 			saveConfigSnapshot()
+			reconcileAndPrintBuiltinShares()
 			remountShares()
+			ensureProxy()
 			return nil
 		},
 	}
@@ -197,7 +204,9 @@ func newRestartCmd() *cobra.Command {
 			if err := restartVM(); err != nil {
 				return err
 			}
+			reconcileAndPrintBuiltinShares()
 			remountShares()
+			ensureProxy()
 			return nil
 		},
 	}
@@ -1103,6 +1112,131 @@ func resolveSSHEndpoint(cfg map[string]string) (host, port string) {
 		return "127.0.0.1", "2222"
 	}
 	return "127.0.0.1", "22"
+}
+
+func checkAlignment() {
+	cfg, err := loadConfig()
+	if err != nil {
+		return // not installed yet
+	}
+
+	var warnings []string
+
+	// Resource alignment check
+	enforce := buildinfo.DefaultEnforceResourceLimit == "1"
+	if v := cfgVal(cfg, "ENFORCE_RESOURCE_LIMIT"); v == "0" {
+		enforce = false
+	}
+
+	if enforce {
+		type resItem struct {
+			Key     string
+			Default string
+			Unit    string
+		}
+		items := []resItem{
+			{"VM_CPUS", buildinfo.DefaultVMCPUs, "核"},
+			{"VM_MEMORY", buildinfo.DefaultVMMemory, "MB"},
+			{"VM_DISK_SIZE", buildinfo.DefaultVMDiskSize, "GB"},
+		}
+		for _, item := range items {
+			minVal, _ := strconv.Atoi(item.Default)
+			if minVal <= 0 {
+				continue
+			}
+			userStr := cfgVal(cfg, item.Key)
+			userVal, _ := strconv.Atoi(userStr)
+			if item.Key == "VM_CPUS" && userVal == 0 {
+				continue
+			}
+			if userVal > 0 && userVal < minVal {
+				warnings = append(warnings,
+					fmt.Sprintf("%s (%s %s) 低于内置最低要求 (%d %s)", item.Key, userStr, item.Unit, minVal, item.Unit))
+			}
+		}
+	}
+
+	// Builtin share alignment check
+	vmUser := cfgVal(cfg, "VM_USER")
+	shareWarnings := share.CheckBuiltinAlignment(buildinfo.DefaultBuiltinShares, vmUser)
+	warnings = append(warnings, shareWarnings...)
+
+	if len(warnings) > 0 {
+		printAlignmentWarning(warnings)
+	}
+}
+
+func printAlignmentWarning(warnings []string) {
+	title := "  ⚠  检测到配置与内置要求不一致"
+	hint := fmt.Sprintf("  请执行: %s setup 进行对齐", buildinfo.AppName)
+
+	maxLen := len([]rune(title))
+	if rl := len([]rune(hint)); rl > maxLen {
+		maxLen = rl
+	}
+	for _, w := range warnings {
+		if rl := len([]rune("  • " + w)); rl > maxLen {
+			maxLen = rl
+		}
+	}
+	maxLen += 4 // padding
+
+	pad := func(s string, width int) string {
+		runes := []rune(s)
+		if len(runes) >= width {
+			return s
+		}
+		return s + strings.Repeat(" ", width-len(runes))
+	}
+
+	border := strings.Repeat("═", maxLen)
+	color.Yellow.Printf("╔%s╗\n", border)
+	color.Yellow.Printf("║%s║\n", pad(title, maxLen))
+	color.Yellow.Printf("╠%s╣\n", border)
+	for _, w := range warnings {
+		line := "  • " + w
+		color.Yellow.Printf("║%s║\n", pad(line, maxLen))
+	}
+	color.Yellow.Printf("╠%s╣\n", border)
+	color.Yellow.Printf("║%s║\n", pad(hint, maxLen))
+	color.Yellow.Printf("╚%s╝\n", border)
+	fmt.Println()
+}
+
+func reconcileAndPrintBuiltinShares() {
+	if buildinfo.DefaultBuiltinShares == "" {
+		return
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return
+	}
+	vmUser := cfgVal(cfg, "VM_USER")
+	res, err := share.ReconcileBuiltinShares(buildinfo.DefaultBuiltinShares, vmUser, false)
+	if err != nil {
+		color.Yellow.Printf("⚠ 内置共享目录对账失败: %v\n", err)
+		return
+	}
+	if len(res.Conflicts) > 0 {
+		color.Yellow.Println("⚠ 内置共享目录冲突:")
+		for _, c := range res.Conflicts {
+			color.Yellow.Printf("  %s\n", c)
+		}
+	}
+	if res.HasChanges() {
+		for _, a := range res.Added {
+			color.Green.Printf("  + 内置共享新增: %s\n", a)
+		}
+		for _, u := range res.Updated {
+			color.Yellow.Printf("  ~ 内置共享更新: %s\n", u)
+		}
+		for _, r := range res.Restored {
+			color.Yellow.Printf("  ↻ 内置共享恢复: %s\n", r)
+		}
+		for _, d := range res.Removed {
+			color.Gray.Printf("  - 内置共享移除: %s\n", d)
+		}
+	}
 }
 
 func saveConfigSnapshot() {

@@ -243,6 +243,9 @@ func shareRemove(name string) error {
 	if s == nil {
 		return fmt.Errorf("未找到共享目录: %s", name)
 	}
+	if s.Builtin {
+		return fmt.Errorf("[%s] 为内置共享目录，不可移除", s.Name)
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -294,10 +297,28 @@ func shareList() error {
 	tw := newTable("名称", "宿主机路径", "VM 挂载点", "状态", "备注")
 	for _, s := range shares {
 		status := shareStatus(cfg, &s, running)
-		tw.AppendRow(gotable.Row{s.Name, s.HostPath, s.MountPoint, status, s.Note})
+		tw.AppendRow(gotable.Row{s.Name, s.HostPath, s.MountPoint, status, shareNoteDisplay(&s)})
 	}
 	fmt.Println(tw.Render())
 	return nil
+}
+
+func shareNoteDisplay(s *share.Share) string {
+	var tags []string
+	if s.Builtin {
+		tags = append(tags, color.Cyan.Sprint("[内置]"))
+	}
+	if s.ReadOnly {
+		tags = append(tags, color.Gray.Sprint("[只读]"))
+	}
+	prefix := strings.Join(tags, "")
+	if s.Note != "" {
+		if prefix != "" {
+			return prefix + " " + s.Note
+		}
+		return s.Note
+	}
+	return prefix
 }
 
 func shareStatus(cfg map[string]string, s *share.Share, running bool) string {
@@ -325,6 +346,9 @@ func shareSetEnabled(name string, enabled bool) error {
 	_, s := share.FindByName(shares, name)
 	if s == nil {
 		return fmt.Errorf("未找到共享目录: %s", name)
+	}
+	if s.Builtin && !enabled {
+		return fmt.Errorf("[%s] 为内置共享目录，不可禁用", s.Name)
 	}
 	if s.Enabled == enabled {
 		if enabled {
@@ -404,7 +428,7 @@ func shareToggle() error {
 	items := make([]tui.ToggleItem, len(shares))
 	for i, s := range shares {
 		label := fmt.Sprintf("%-14s %s → %s", s.Name, s.HostPath, s.MountPoint)
-		items[i] = tui.ToggleItem{Name: s.Name, Label: label, Checked: s.Enabled}
+		items[i] = tui.ToggleItem{Name: s.Name, Label: label, Checked: s.Enabled, Locked: s.Builtin}
 	}
 
 	result, err := tui.RunToggle(items)
@@ -500,7 +524,7 @@ func showShareSummary() {
 	tw := newTable("名称", "宿主机路径", "VM 挂载点", "状态", "备注")
 	for _, s := range shares {
 		status := shareStatus(cfg, &s, running)
-		tw.AppendRow(gotable.Row{s.Name, s.HostPath, s.MountPoint, status, s.Note})
+		tw.AppendRow(gotable.Row{s.Name, s.HostPath, s.MountPoint, status, shareNoteDisplay(&s)})
 	}
 	fmt.Println(tw.Render())
 }
@@ -672,9 +696,17 @@ func ensureFstabEntry(cfg map[string]string, s *share.Share) error {
 
 	var fstabLine string
 	if runtime.GOOS == "windows" {
-		fstabLine = fmt.Sprintf("%s %s vboxsf uid=1000,gid=1000,_netdev,nofail 0 0", s.Tag, s.MountPoint)
+		opts := "uid=1000,gid=1000,_netdev,nofail"
+		if s.ReadOnly {
+			opts = "uid=1000,gid=1000,ro,_netdev,nofail"
+		}
+		fstabLine = fmt.Sprintf("%s %s vboxsf %s 0 0", s.Tag, s.MountPoint, opts)
 	} else {
-		fstabLine = fmt.Sprintf("%s %s 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0", s.Tag, s.MountPoint)
+		rwFlag := "rw"
+		if s.ReadOnly {
+			rwFlag = "ro"
+		}
+		fstabLine = fmt.Sprintf("%s %s 9p trans=virtio,version=9p2000.L,%s,_netdev,nofail 0 0", s.Tag, s.MountPoint, rwFlag)
 	}
 
 	cmd := fmt.Sprintf("printf '\\n# %s\\n%s\\n' | sudo tee -a /etc/fstab > /dev/null", marker, fstabLine)

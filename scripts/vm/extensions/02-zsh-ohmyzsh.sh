@@ -6,7 +6,7 @@ set -euo pipefail
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 
-VM_USER="${VM_USER:-wpsweb}"
+VM_USER="${VM_USER:-$(getent passwd 1000 | cut -d: -f1)}"
 USER_HOME="$(eval echo "~${VM_USER}")"
 ARCH="$(dpkg --print-architecture)"
 

@@ -19,6 +19,8 @@ type Share struct {
 	Enabled    bool      `json:"enabled"`
 	Note       string    `json:"note,omitempty"`
 	AddedAt    time.Time `json:"added_at"`
+	Builtin    bool      `json:"builtin,omitempty"`
+	ReadOnly   bool      `json:"read_only,omitempty"`
 }
 
 func Load() ([]Share, error) {
@@ -70,6 +72,15 @@ func FindByMapping(shares []Share, hostPath, mountPoint string) (int, *Share) {
 func FindByTag(shares []Share, tag string) (int, *Share) {
 	for i := range shares {
 		if shares[i].Tag == tag {
+			return i, &shares[i]
+		}
+	}
+	return -1, nil
+}
+
+func FindByMountPoint(shares []Share, mountPoint string) (int, *Share) {
+	for i := range shares {
+		if shares[i].MountPoint == mountPoint {
 			return i, &shares[i]
 		}
 	}

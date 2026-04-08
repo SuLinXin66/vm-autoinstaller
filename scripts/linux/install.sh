@@ -32,6 +32,7 @@ NETWORK_MODE="${NETWORK_MODE:-nat}"
 BRIDGE_NAME="${BRIDGE_NAME:-br0}"
 DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
 UBUNTU_IMAGE_BASE_URL="${UBUNTU_IMAGE_BASE_URL:-https://cloud-images.ubuntu.com/releases}"
+PROXY="${PROXY:-}"
 
 # --- Derived paths ---
 ARCH="$(uname -m)"
@@ -85,6 +86,9 @@ echo "  用户名:     ${VM_USER}"
 echo "  Ubuntu:     ${UBUNTU_VERSION}"
 echo "  网络模式:   ${NETWORK_MODE}"
 echo "  数据目录:   ${DATA_DIR}"
+if [[ -n "$PROXY" ]]; then
+echo "  代理:       ${PROXY}"
+fi
 echo ""
 
 if ! utils::confirm "确认以上配置并开始安装?"; then
@@ -187,6 +191,42 @@ log::info "生成 cloud-init 配置..."
 export VM_NAME VM_USER SSH_PUBLIC_KEY
 envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY}' \
     < "${REPO_ROOT}/vm/cloud-init/user-data.yaml.tpl" > "$USER_DATA"
+
+# Inject proxy config into cloud-init if configured
+if [[ -n "$PROXY" ]]; then
+    log::info "注入代理配置: ${PROXY}"
+
+    # 1. apt proxy (cloud-init apt module) — insert before package_update
+    sed -i "/^package_update: true/i\\
+apt:\\
+  http_proxy: \"${PROXY}\"\\
+  https_proxy: \"${PROXY}\"" "$USER_DATA"
+
+    # 2. Proxy config files — insert into write_files section
+    awk -v proxy="$PROXY" '
+/^write_files:/ {
+    print
+    print "  - path: /etc/profile.d/proxy.sh"
+    print "    permissions: \"0755\""
+    print "    content: |"
+    print "      export http_proxy=" proxy
+    print "      export https_proxy=" proxy
+    print "      export HTTP_PROXY=" proxy
+    print "      export HTTPS_PROXY=" proxy
+    print "      export no_proxy=localhost,127.0.0.1,::1"
+    print "  - path: /etc/apt/apt.conf.d/99proxy"
+    print "    content: |"
+    printf "      Acquire::http::Proxy \"%s\";\n", proxy
+    printf "      Acquire::https::Proxy \"%s\";\n", proxy
+    next
+}
+{ print }' "$USER_DATA" > "${USER_DATA}.tmp" && mv "${USER_DATA}.tmp" "$USER_DATA"
+
+    # 3. Docker install script — source proxy env so curl/apt use it
+    sed -i '/set -euo pipefail/a\      [ -f /etc/profile.d/proxy.sh ] && source /etc/profile.d/proxy.sh' "$USER_DATA"
+
+    log::ok "代理已注入 cloud-init（apt + Docker + 环境变量）"
+fi
 
 # Create seed ISO
 vm::create_seed_iso "$USER_DATA" "$SEED_ISO"

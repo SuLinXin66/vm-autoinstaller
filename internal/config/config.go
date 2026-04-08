@@ -60,6 +60,7 @@ var KnownKeys = map[string]KeyMeta{
 	"UBUNTU_IMAGE_BASE_URL":  {Description: "Cloud Image 下载源", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultUbuntuImageBaseURL},
 	"AUTO_YES":               {Description: "跳过确认提示", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultAutoYes},
 	"ENFORCE_RESOURCE_LIMIT": {Description: "强制资源下限", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultEnforceResourceLimit},
+	"PROXY":                  {Description: "VM 代理地址 (如 http://host:port)", EffectLevel: LevelNone, Type: TypeString},
 }
 
 func init() {

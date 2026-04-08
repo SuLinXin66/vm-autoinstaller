@@ -12,6 +12,7 @@ type ToggleItem struct {
 	Name    string
 	Label   string
 	Checked bool
+	Locked  bool // Locked items cannot be toggled
 }
 
 type ToggleResult struct {
@@ -48,7 +49,9 @@ func (m toggleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case " ":
-			m.items[m.cursor].Checked = !m.items[m.cursor].Checked
+			if !m.items[m.cursor].Locked {
+				m.items[m.cursor].Checked = !m.items[m.cursor].Checked
+			}
 		}
 	}
 	return m, nil
@@ -70,6 +73,9 @@ func (m toggleModel) View() string {
 			check = color.Green.Sprint("[✓]")
 		}
 		label := item.Label
+		if item.Locked {
+			label += color.Gray.Sprint(" [内置]")
+		}
 		if i == m.cursor {
 			label = color.Bold.Sprint(label)
 		}

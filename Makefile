@@ -18,7 +18,8 @@ LDFLAGS  := -s -w \
   -X '$(MODULE)/internal/buildinfo.DefaultBridgeName=$(DEFAULT_BRIDGE_NAME)' \
   -X '$(MODULE)/internal/buildinfo.DefaultUbuntuImageBaseURL=$(DEFAULT_UBUNTU_IMAGE_BASE_URL)' \
   -X '$(MODULE)/internal/buildinfo.DefaultAutoYes=$(DEFAULT_AUTO_YES)' \
-  -X '$(MODULE)/internal/buildinfo.DefaultEnforceResourceLimit=$(DEFAULT_ENFORCE_RESOURCE_LIMIT)'
+  -X '$(MODULE)/internal/buildinfo.DefaultEnforceResourceLimit=$(DEFAULT_ENFORCE_RESOURCE_LIMIT)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultBuiltinShares=$(DEFAULT_BUILTIN_SHARES)'
 
 PLATFORMS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 DIST      := dist

@@ -42,6 +42,7 @@ $netMode = Get-ConfigValue -Config $cfg -Key 'NETWORK_MODE' -Default 'nat'
 $bridgeName = Get-ConfigValue -Config $cfg -Key 'BRIDGE_NAME' -Default 'br0'
 $dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
 $imgBase = Get-ConfigValue -Config $cfg -Key 'UBUNTU_IMAGE_BASE_URL' -Default 'https://cloud-images.ubuntu.com/releases'
+$proxy = Get-ConfigValue -Config $cfg -Key 'PROXY' -Default ''
 
 $cloudArch = 'amd64'
 $imageName = "ubuntu-${ubuntuVer}-server-cloudimg-${cloudArch}.img"
@@ -64,6 +65,7 @@ Write-Host "  用户名:     $vmUser"
 Write-Host "  Ubuntu:     $ubuntuVer"
 Write-Host "  网络模式:   $netMode"
 Write-Host "  数据目录:   $dataDir"
+if ($proxy) { Write-Host "  代理:       $proxy" }
 Write-Host ''
 
 if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?' -Config $cfg)) {
@@ -141,6 +143,32 @@ $rendered = $tpl.Replace('${VM_NAME}', $vmName).Replace('${VM_USER}', $vmUser).R
 # cloud-init 不兼容 UTF-8 BOM，必须写入无 BOM 的 UTF-8
 $rendered = $rendered.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($userDataYaml, $rendered, [System.Text.UTF8Encoding]::new($false))
+
+# Inject proxy into cloud-init if configured
+if ($proxy) {
+    Write-LogInfo "注入代理配置: $proxy"
+    $aptSection = "apt:`n  http_proxy: `"$proxy`"`n  https_proxy: `"$proxy`"`n"
+    $rendered = $rendered.Replace("package_update: true", "${aptSection}package_update: true")
+
+    $proxyFiles = @"
+  - path: /etc/profile.d/proxy.sh
+    permissions: "0755"
+    content: |
+      export http_proxy=$proxy
+      export https_proxy=$proxy
+      export HTTP_PROXY=$proxy
+      export HTTPS_PROXY=$proxy
+      export no_proxy=localhost,127.0.0.1,::1
+  - path: /etc/apt/apt.conf.d/99proxy
+    content: |
+      Acquire::http::Proxy "$proxy";
+      Acquire::https::Proxy "$proxy";
+"@
+    $rendered = $rendered.Replace("write_files:`n", "write_files:`n$proxyFiles`n")
+    $rendered = $rendered.Replace("set -euo pipefail", "set -euo pipefail`n      [ -f /etc/profile.d/proxy.sh ] && source /etc/profile.d/proxy.sh")
+    [System.IO.File]::WriteAllText($userDataYaml, $rendered, [System.Text.UTF8Encoding]::new($false))
+    Write-LogOk '代理已注入 cloud-init'
+}
 
 # 验证 user-data 中包含 SSH 公钥
 $writtenContent = [System.IO.File]::ReadAllText($userDataYaml, [System.Text.UTF8Encoding]::new($false))

@@ -110,7 +110,7 @@ for ext in "${extensions[@]}"; do
 
     log::info "执行扩展: ${name}..."
 
-    if _provision::ssh_exec "$ip" "sudo bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
+    if _provision::ssh_exec "$ip" "sudo VM_USER='${VM_USER}' bash ${REMOTE_DIR}/$(basename "$ext")" 2>&1; then
         echo "${local_hash}" | _provision::ssh_exec "$ip" "sudo tee '${MARKER_DIR}/${name}.done' > /dev/null"
         (( ++succeeded )) || true
     else

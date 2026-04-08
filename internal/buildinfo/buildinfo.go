@@ -15,6 +15,7 @@ var (
 	DefaultNetworkMode        = "nat"
 	DefaultBridgeName         = "br0"
 	DefaultUbuntuImageBaseURL = "https://cloud-images.ubuntu.com/releases"
-	DefaultAutoYes            = "0"
+	DefaultAutoYes              = "0"
 	DefaultEnforceResourceLimit = "1"
+	DefaultBuiltinShares        = ""
 )
