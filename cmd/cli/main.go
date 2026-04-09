@@ -177,6 +177,7 @@ func newSetupCmd() *cobra.Command {
 			saveConfigSnapshot()
 			reconcileAndPrintBuiltinShares()
 			remountShares()
+			ensureSSHForward()
 			ensureProxy()
 			ensureMirror()
 			return nil
@@ -208,6 +209,7 @@ func newRestartCmd() *cobra.Command {
 			}
 			reconcileAndPrintBuiltinShares()
 			remountShares()
+			ensureSSHForward()
 			ensureProxy()
 			ensureMirror()
 			return nil
@@ -293,8 +295,12 @@ func newExecCmd() *cobra.Command {
 			keyPath := filepath.Join(dataDir, "id_ed25519")
 
 			sshHost, sshPort := resolveSSHEndpoint(cfg)
+			if sshHost == "" {
+				return fmt.Errorf("无法获取 VM IP，请确认 VM 正在运行")
+			}
 
 			sshArgs := []string{
+				"-A",
 				"-o", "StrictHostKeyChecking=no",
 				"-o", "UserKnownHostsFile=" + knownHostsDevNull(),
 				"-o", "LogLevel=ERROR",
@@ -344,6 +350,9 @@ vm: 前缀表示 VM 内路径。`, buildinfo.AppName, buildinfo.AppName),
 			dataDir := cfgVal(cfg, "DATA_DIR")
 			keyPath := filepath.Join(dataDir, "id_ed25519")
 			sshHost, sshPort := resolveSSHEndpoint(cfg)
+			if sshHost == "" {
+				return fmt.Errorf("无法获取 VM IP，请确认 VM 正在运行")
+			}
 
 			scpArgs := []string{
 				"-o", "StrictHostKeyChecking=no",
@@ -1155,7 +1164,11 @@ func resolveSSHEndpoint(cfg map[string]string) (host, port string) {
 	if runtime.GOOS == "windows" {
 		return "127.0.0.1", "2222"
 	}
-	return "127.0.0.1", "22"
+	vmName := cfgVal(cfg, "VM_NAME")
+	if ip := getVirshIP(vmName); ip != "" {
+		return ip, "22"
+	}
+	return "", ""
 }
 
 func checkAlignment() {

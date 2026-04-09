@@ -591,16 +591,9 @@ func sshExec(cfg map[string]string, command string) (string, error) {
 	dataDir := cfgVal(cfg, "DATA_DIR")
 	keyPath := filepath.Join(dataDir, "id_ed25519")
 
-	var sshHost, sshPort string
-	if runtime.GOOS == "windows" {
-		sshHost, sshPort = "127.0.0.1", "2222"
-	} else {
-		vmName := cfgVal(cfg, "VM_NAME")
-		ip := getVirshIP(vmName)
-		if ip == "" {
-			return "", fmt.Errorf("无法获取 VM IP")
-		}
-		sshHost, sshPort = ip, "22"
+	sshHost, sshPort := resolveSSHEndpoint(cfg)
+	if sshHost == "" {
+		return "", fmt.Errorf("无法获取 VM IP")
 	}
 
 	args := []string{

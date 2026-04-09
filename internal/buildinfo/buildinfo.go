@@ -21,4 +21,5 @@ var (
 	DefaultAPTMirror            = ""
 	DefaultCNMode               = "0"
 	DefaultGitHubProxy          = ""
+	DefaultSSHForward           = "0"
 )

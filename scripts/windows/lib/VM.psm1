@@ -27,6 +27,7 @@ function Get-SshBaseArgs {
     param()
     # 注意：不能用 $args 做变量名，它是 PowerShell 自动变量，在高级函数中只读
     $sshOpts = @(
+        '-A',
         '-o', 'StrictHostKeyChecking=no',
         '-o', 'UserKnownHostsFile=NUL',
         '-o', 'ConnectTimeout=10',

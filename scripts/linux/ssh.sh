@@ -25,7 +25,7 @@ fi
 
 ip="$(vm::get_ip "$VM_NAME")" || log::die "无法获取 VM IP 地址"
 
-ssh_args=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+ssh_args=(-A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 if [[ -f "$SSH_KEY_PATH" ]]; then
     ssh_args+=(-i "$SSH_KEY_PATH")
 fi

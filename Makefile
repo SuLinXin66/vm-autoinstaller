@@ -22,7 +22,8 @@ LDFLAGS  := -s -w \
   -X '$(MODULE)/internal/buildinfo.DefaultBuiltinShares=$(DEFAULT_BUILTIN_SHARES)' \
   -X '$(MODULE)/internal/buildinfo.DefaultAPTMirror=$(DEFAULT_APT_MIRROR)' \
   -X '$(MODULE)/internal/buildinfo.DefaultCNMode=$(DEFAULT_CN_MODE)' \
-  -X '$(MODULE)/internal/buildinfo.DefaultGitHubProxy=$(DEFAULT_GITHUB_PROXY)'
+  -X '$(MODULE)/internal/buildinfo.DefaultGitHubProxy=$(DEFAULT_GITHUB_PROXY)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultSSHForward=$(DEFAULT_SSH_FORWARD)'
 
 PLATFORMS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 DIST      := dist
@@ -71,6 +72,7 @@ installer: cli
 			-e 's|^APT_MIRROR=.*|APT_MIRROR=$(DEFAULT_APT_MIRROR)|' \
 			-e 's|^CN_MODE=.*|CN_MODE=$(DEFAULT_CN_MODE)|' \
 			-e 's|^GITHUB_PROXY=.*|GITHUB_PROXY=$(DEFAULT_GITHUB_PROXY)|' \
+			-e 's|^SSH_FORWARD=.*|SSH_FORWARD=$(DEFAULT_SSH_FORWARD)|' \
 			"$$staging/vm/config.env.example"; \
 		cp "$(DIST)/cli/$${os}_$${arch}/$(APP_NAME)$$ext" "$$staging/_cli/$(APP_NAME)$$ext"; \
 		echo "  BUILD  installer $$os/$$arch"; \
