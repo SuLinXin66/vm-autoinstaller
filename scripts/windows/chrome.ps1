@@ -40,15 +40,66 @@ $scpExe = (Get-Command scp.exe -ErrorAction Stop).Source
 $baseArgs = (Get-SshBaseArgs) + @('-p', "$vmPort")
 $scpBaseArgs = (Get-SshBaseArgs) + @('-P', "$vmPort")
 
-# 同步 Chrome/Chromium 书签策略文件到 VM（两个路径都写，兼容所有安装方式）
+# 同步 Chrome/Chromium 书签到 VM
 $bookmarksJson = Join-Path $VMDir 'config\chrome-bookmarks.json'
 if (Test-Path -LiteralPath $bookmarksJson) {
     Write-LogInfo '同步 Chrome 书签...'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
-    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed' 2>&1
-    $null = & $scpExe @scpBaseArgs $bookmarksJson "${vmUser}@${vmHost}:/tmp/bookmarks.json" 2>&1
-    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo cp /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json && sudo cp /tmp/bookmarks.json /etc/chromium/policies/managed/bookmarks.json && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json && rm -f /tmp/bookmarks.json' 2>&1
+
+    # 清理旧的 ManagedBookmarks 策略文件（它会创建独立的托管书签文件夹，不是我们想要的）
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo rm -f /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json' 2>&1
+
+    # 上传书签 JSON 到 VM
+    $null = & $scpExe @scpBaseArgs $bookmarksJson "${vmUser}@${vmHost}:/tmp/_managed_bookmarks.json" 2>&1
+
+    # 直接注入到 Chrome/Chromium 的 Bookmarks 文件（支持首次启动前 profile 目录不存在的情况）
+    $pyScript = @'
+import json, sys, os, uuid, time, shutil, subprocess
+src = sys.argv[1] if len(sys.argv) > 1 else "/tmp/_managed_bookmarks.json"
+if not os.path.exists(src): sys.exit(0)
+with open(src) as f: data = json.load(f)
+entries = [e for e in data.get("ManagedBookmarks", []) if "toplevel_name" not in e]
+if not entries: sys.exit(0)
+def ct(): return str(int((time.time() + 11644473600) * 1000000))
+_id = [4]
+def nid():
+    _id[0] += 1; return str(_id[0] - 1)
+def conv(e):
+    n = ct()
+    if "children" in e:
+        return {"children": [conv(c) for c in e["children"]], "date_added": n, "date_last_used": "0", "date_modified": n, "guid": str(uuid.uuid4()), "id": nid(), "name": e["name"], "type": "folder"}
+    return {"date_added": n, "date_last_used": "0", "guid": str(uuid.uuid4()), "id": nid(), "name": e["name"], "type": "url", "url": e.get("url", "")}
+managed_items = [conv(e) for e in entries]
+managed_names = {e["name"] for e in entries}
+candidates = [os.path.expanduser(p) for p in ["~/.var/app/org.chromium.Chromium/config/chromium/Default", "~/.config/chromium/Default", "~/.config/google-chrome/Default"]]
+target = None
+for pd in candidates:
+    if os.path.isdir(pd): target = pd; break
+if target is None:
+    for cmd, pdir in [("google-chrome-stable", "~/.config/google-chrome/Default"), ("chromium-browser", "~/.config/chromium/Default"), ("chromium", "~/.config/chromium/Default")]:
+        if shutil.which(cmd): target = os.path.expanduser(pdir); os.makedirs(target, exist_ok=True); break
+if target is None:
+    try:
+        r = subprocess.run(["flatpak", "list", "--app"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and "org.chromium.Chromium" in r.stdout: target = os.path.expanduser("~/.var/app/org.chromium.Chromium/config/chromium/Default"); os.makedirs(target, exist_ok=True)
+    except Exception: pass
+if target is None: sys.exit(0)
+bp = os.path.join(target, "Bookmarks")
+n = ct()
+if os.path.exists(bp):
+    with open(bp) as f: bk = json.load(f)
+    ch = [c for c in bk["roots"]["bookmark_bar"]["children"] if c.get("name") not in managed_names]
+    bk["roots"]["bookmark_bar"]["children"] = managed_items + ch
+else:
+    bk = {"checksum": "", "roots": {"bookmark_bar": {"children": managed_items, "date_added": n, "date_last_used": "0", "date_modified": n, "guid": "0bc5d13f-2cba-5d74-951f-3f233fe6c908", "id": "1", "name": "Bookmarks bar", "type": "folder"}, "other": {"children": [], "date_added": n, "date_last_used": "0", "date_modified": "0", "guid": "82b081ec-3dd3-529b-8c4f-a52e0b495b63", "id": "2", "name": "Other bookmarks", "type": "folder"}, "synced": {"children": [], "date_added": n, "date_last_used": "0", "date_modified": "0", "guid": "4cf2e351-0e85-532b-bb37-df045d8f8d0f", "id": "3", "name": "Mobile bookmarks", "type": "folder"}}, "version": 1}
+with open(bp, "w") as f: json.dump(bk, f, ensure_ascii=False, indent=3)
+'@
+    $pyTmp = New-TemporaryFile
+    Set-Content -Path $pyTmp.FullName -Value $pyScript -Encoding utf8NoBOM
+    $null = & $scpExe @scpBaseArgs $pyTmp.FullName "${vmUser}@${vmHost}:/tmp/_sync_bm.py" 2>&1
+    Remove-Item $pyTmp.FullName -Force -ErrorAction SilentlyContinue
+    $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'python3 /tmp/_sync_bm.py /tmp/_managed_bookmarks.json; rm -f /tmp/_sync_bm.py /tmp/_managed_bookmarks.json' 2>&1
     $ErrorActionPreference = $prevEAP
     if ($LASTEXITCODE -eq 0) { Write-LogOk '书签已同步' } else { Write-LogWarn '书签同步失败，继续启动' }
 }
@@ -72,7 +123,7 @@ if (-not $vcxsrv) {
     Write-LogWarn '未找到 VcXsrv，尝试 winget 安装...'
     if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
         try {
-            & winget.exe install --id marha.VcXsrv -e --accept-package-agreements --accept-source-agreements 2>$null
+            & winget.exe install --id marha.VcXsrv -e --source winget --accept-package-agreements --accept-source-agreements 2>$null
         }
         catch { }
         Start-Sleep -Seconds 3

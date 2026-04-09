@@ -38,7 +38,6 @@ if (-not (Request-UserConfirmation -Prompt "确认销毁 VM [$vmName] 及其所�
     exit 0
 }
 
-Install-VirtualBox
 Remove-VM -Name $vmName -DataDir $dataDir
 
 if ((Test-Path -LiteralPath $sshKeyPath) -or (Test-Path -LiteralPath "$sshKeyPath.pub")) {

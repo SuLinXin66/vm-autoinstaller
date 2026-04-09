@@ -59,8 +59,11 @@ function Read-ProjectConfig {
             }
         }
         # 展开 bash 风格占位（Windows 下 HOME → USERPROFILE）
+        # 同时支持 ${HOME} 和 $HOME 两种写法
         $raw = $raw -replace '\$\{HOME\}', $env:USERPROFILE
+        $raw = $raw -replace '\$HOME(?=[/\\]|$)', $env:USERPROFILE
         $raw = $raw -replace '\$\{USERPROFILE\}', $env:USERPROFILE
+        $raw = $raw -replace '\$USERPROFILE(?=[/\\]|$)', $env:USERPROFILE
         $ht[$key] = $raw
     }
     return $ht

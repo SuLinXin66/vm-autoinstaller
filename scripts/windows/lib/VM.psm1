@@ -93,7 +93,7 @@ function Install-VirtualBox {
         }
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & winget.exe install --id Oracle.VirtualBox -e --accept-package-agreements --accept-source-agreements
+        & winget.exe install --id Oracle.VirtualBox -e --source winget --accept-package-agreements --accept-source-agreements
         $ErrorActionPreference = $prevEAP
         $script:VBoxManagePath = $null
         Start-Sleep -Seconds 2

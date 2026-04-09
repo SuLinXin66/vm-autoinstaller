@@ -110,8 +110,9 @@ PINEOF
 
             if flatpak install -y flathub org.chromium.Chromium; then
                 _chromium_ok=true
-                # 允许 Flatpak Chromium 读取宿主策略文件（书签等）
-                flatpak override --filesystem=/etc/chromium/policies/managed:ro org.chromium.Chromium 2>/dev/null || true
+                # host-etc 让 Flatpak 正确映射宿主 /etc → /run/host/etc/，
+                # Flathub Chromium 内置包装脚本会自动 symlink /etc/chromium → /run/host/etc/chromium
+                flatpak override --filesystem=host-etc:ro org.chromium.Chromium 2>/dev/null || true
                 echo "  Chromium (Flatpak) 安装成功"
             fi
         fi

@@ -915,16 +915,24 @@ func newUninstallCmd() *cobra.Command {
 func runUninstall(force bool) error {
 	dataRoot := paths.DataRoot()
 	binDir := paths.BinDir()
-	metaPath := paths.MetaPath()
 
 	if _, err := os.Stat(dataRoot); os.IsNotExist(err) {
 		fmt.Println("已是干净状态，无需卸载。")
 		return nil
 	}
 
+	// Read config to get DATA_DIR before destroying anything
+	var vmDataDir string
+	if cfg, err := loadConfig(); err == nil {
+		vmDataDir = cfgVal(cfg, "DATA_DIR")
+	}
+
 	if !force {
 		fmt.Printf("⚠ 即将卸载 %s\n", buildinfo.AppName)
 		fmt.Printf("  - 销毁 VM\n")
+		if vmDataDir != "" && vmDataDir != dataRoot {
+			fmt.Printf("  - 删除 VM 数据目录 %s\n", vmDataDir)
+		}
 		fmt.Printf("  - 删除 %s\n", dataRoot)
 		fmt.Printf("  - 撤销 PATH 修改\n")
 		fmt.Print("确认? [y/N] ")
@@ -936,8 +944,12 @@ func runUninstall(force bool) error {
 		}
 	}
 
+	totalSteps := 4
+	step := 0
+
 	// Step 1: Destroy VM
-	fmt.Println("[1/3] 销毁 VM...")
+	step++
+	fmt.Printf("[%d/%d] 销毁 VM...\n", step, totalSteps)
 	if err := runner.RunScript("destroy", "-y"); err != nil {
 		fmt.Printf("⚠ 销毁 VM 失败: %v\n", err)
 		if !force {
@@ -950,8 +962,20 @@ func runUninstall(force bool) error {
 		}
 	}
 
-	// Step 2: Remove PATH
-	fmt.Println("[2/3] 撤销 PATH...")
+	// Step 2: Remove VM data directory (cloud image, console.log, etc.)
+	step++
+	fmt.Printf("[%d/%d] 清理 VM 数据目录...\n", step, totalSteps)
+	if vmDataDir != "" && vmDataDir != dataRoot {
+		if err := os.RemoveAll(vmDataDir); err != nil {
+			fmt.Printf("⚠ 清理 VM 数据目录失败: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ 已删除: %s\n", vmDataDir)
+		}
+	}
+
+	// Step 3: Remove PATH
+	step++
+	fmt.Printf("[%d/%d] 撤销 PATH...\n", step, totalSteps)
 	removed, err := pathmgr.RemoveFromPath(binDir)
 	if err != nil {
 		fmt.Printf("⚠ PATH 清理部分失败: %v\n", err)
@@ -960,25 +984,22 @@ func runUninstall(force bool) error {
 		fmt.Printf("  ✓ 已清理: %s\n", strings.Join(removed, ", "))
 	}
 
-	// Step 3: Self-delete via helper
-	fmt.Println("[3/3] 删除数据目录...")
-
-	// Read meta for verification
-	_ = metaPath
+	// Step 4: Delete app data directory
+	step++
+	fmt.Printf("[%d/%d] 删除应用数据目录...\n", step, totalSteps)
 
 	if runtime.GOOS == "windows" {
 		selfDeleteWindows(dataRoot)
-	} else {
-		selfDeleteUnix(dataRoot)
-	}
-
-	// Verify
-	if _, err := os.Stat(dataRoot); os.IsNotExist(err) {
 		fmt.Printf("\n✓ %s 卸载完成！\n", buildinfo.AppName)
 	} else {
-		fmt.Printf("\n⚠ 数据目录可能未完全删除。请手动执行:\n")
-		fmt.Printf("    rm -rf %s\n", dataRoot)
-		return fmt.Errorf("卸载不完整")
+		selfDeleteUnix(dataRoot)
+		if _, err := os.Stat(dataRoot); os.IsNotExist(err) {
+			fmt.Printf("\n✓ %s 卸载完成！\n", buildinfo.AppName)
+		} else {
+			fmt.Printf("\n⚠ 数据目录可能未完全删除。请手动执行:\n")
+			fmt.Printf("    rm -rf %s\n", dataRoot)
+			return fmt.Errorf("卸载不完整")
+		}
 	}
 	return nil
 }

@@ -258,20 +258,109 @@ if [[ ! -f "$SSH_KEY_PATH" ]]; then
     log::die "SSH 密钥不存在: ${SSH_KEY_PATH}，请先运行 ${APP_NAME} setup"
 fi
 
-# 同步 Chrome/Chromium 书签策略文件到 VM（两个路径都写，兼容所有安装方式）
+# 同步 Chrome/Chromium 书签到 VM
 _BOOKMARKS_JSON="${REPO_ROOT}/vm/config/chrome-bookmarks.json"
 if [[ -f "$_BOOKMARKS_JSON" ]]; then
     log::info "同步 Chrome 书签..."
     _ssh_opts=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
-    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "sudo mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed" 2>/dev/null || true
-    scp "${_ssh_opts[@]}" "$_BOOKMARKS_JSON" "${VM_USER}@${ip}:/tmp/bookmarks.json" 2>/dev/null \
-        && ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" \
-            "sudo cp /tmp/bookmarks.json /etc/opt/chrome/policies/managed/bookmarks.json \
-             && sudo cp /tmp/bookmarks.json /etc/chromium/policies/managed/bookmarks.json \
-             && sudo chmod 644 /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json \
-             && rm -f /tmp/bookmarks.json" 2>/dev/null \
+
+    # 清理旧的 ManagedBookmarks 策略文件（它会创建独立的托管书签文件夹，不是我们想要的）
+    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" \
+        "sudo rm -f /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json" 2>/dev/null || true
+
+    # 上传书签 JSON 到 VM
+    scp "${_ssh_opts[@]}" "$_BOOKMARKS_JSON" "${VM_USER}@${ip}:/tmp/_managed_bookmarks.json" 2>/dev/null || true
+
+    # 直接注入到 Chrome/Chromium 的 Bookmarks 文件（支持首次启动前 profile 目录不存在的情况）
+    cat << 'PYEOF' | ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "cat > /tmp/_sync_bm.py && python3 /tmp/_sync_bm.py /tmp/_managed_bookmarks.json; rm -f /tmp/_sync_bm.py" 2>/dev/null \
         && log::ok "书签已同步" \
         || log::warn "书签同步失败，继续启动"
+import json, sys, os, uuid, time, shutil, subprocess
+
+src = sys.argv[1] if len(sys.argv) > 1 else "/tmp/_managed_bookmarks.json"
+if not os.path.exists(src):
+    sys.exit(0)
+with open(src) as f:
+    data = json.load(f)
+
+entries = [e for e in data.get("ManagedBookmarks", []) if "toplevel_name" not in e]
+if not entries:
+    sys.exit(0)
+
+def ct():
+    return str(int((time.time() + 11644473600) * 1000000))
+
+_id = [4]
+def nid():
+    _id[0] += 1
+    return str(_id[0] - 1)
+
+def conv(e):
+    n = ct()
+    if "children" in e:
+        return {"children": [conv(c) for c in e["children"]], "date_added": n,
+                "date_last_used": "0", "date_modified": n, "guid": str(uuid.uuid4()),
+                "id": nid(), "name": e["name"], "type": "folder"}
+    return {"date_added": n, "date_last_used": "0", "guid": str(uuid.uuid4()),
+            "id": nid(), "name": e["name"], "type": "url", "url": e.get("url", "")}
+
+managed_items = [conv(e) for e in entries]
+managed_names = {e["name"] for e in entries}
+
+candidates = [os.path.expanduser(p) for p in [
+    "~/.var/app/org.chromium.Chromium/config/chromium/Default",
+    "~/.config/chromium/Default",
+    "~/.config/google-chrome/Default"]]
+
+target = None
+for pd in candidates:
+    if os.path.isdir(pd):
+        target = pd
+        break
+
+if target is None:
+    for cmd, pdir in [("google-chrome-stable", "~/.config/google-chrome/Default"),
+                      ("chromium-browser", "~/.config/chromium/Default"),
+                      ("chromium", "~/.config/chromium/Default")]:
+        if shutil.which(cmd):
+            target = os.path.expanduser(pdir)
+            os.makedirs(target, exist_ok=True)
+            break
+if target is None:
+    try:
+        r = subprocess.run(["flatpak", "list", "--app"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and "org.chromium.Chromium" in r.stdout:
+            target = os.path.expanduser("~/.var/app/org.chromium.Chromium/config/chromium/Default")
+            os.makedirs(target, exist_ok=True)
+    except Exception:
+        pass
+
+if target is None:
+    sys.exit(0)
+
+bp = os.path.join(target, "Bookmarks")
+n = ct()
+if os.path.exists(bp):
+    with open(bp) as f:
+        bk = json.load(f)
+    ch = [c for c in bk["roots"]["bookmark_bar"]["children"] if c.get("name") not in managed_names]
+    bk["roots"]["bookmark_bar"]["children"] = managed_items + ch
+else:
+    bk = {"checksum": "", "roots": {
+        "bookmark_bar": {"children": managed_items, "date_added": n, "date_last_used": "0",
+            "date_modified": n, "guid": "0bc5d13f-2cba-5d74-951f-3f233fe6c908",
+            "id": "1", "name": "Bookmarks bar", "type": "folder"},
+        "other": {"children": [], "date_added": n, "date_last_used": "0",
+            "date_modified": "0", "guid": "82b081ec-3dd3-529b-8c4f-a52e0b495b63",
+            "id": "2", "name": "Other bookmarks", "type": "folder"},
+        "synced": {"children": [], "date_added": n, "date_last_used": "0",
+            "date_modified": "0", "guid": "4cf2e351-0e85-532b-bb37-df045d8f8d0f",
+            "id": "3", "name": "Mobile bookmarks", "type": "folder"}},
+        "version": 1}
+with open(bp, "w") as f:
+    json.dump(bk, f, ensure_ascii=False, indent=3)
+PYEOF
+    ssh "${_ssh_opts[@]}" "${VM_USER}@${ip}" "rm -f /tmp/_managed_bookmarks.json" 2>/dev/null || true
 fi
 
 # 确保宿主机 xpra 版本与 VM 端兼容，安装剪贴板依赖
