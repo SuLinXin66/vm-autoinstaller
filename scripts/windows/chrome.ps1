@@ -7,15 +7,10 @@ $VMDir = Join-Path $RepoRoot 'vm'
 
 Get-ChildItem (Join-Path $_ScriptDir 'lib\*.psm1') | Sort-Object Name | ForEach-Object { Import-Module $_.FullName -Force -Global }
 
-if (-not (Test-ConfigExists)) {
-    Write-LogError 'config.env 不存在'
-    exit 1
-}
-
-$cfg = Read-ProjectConfig
-$vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'
-$dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
+$vmName = $env:VM_NAME
+$vmUser = $env:VM_USER
+$dataDir = $env:DATA_DIR
+if (-not $dataDir) { $dataDir = Join-Path $env:USERPROFILE '.kvm-ubuntu' }
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 if (-not (Test-VMExists -Name $vmName)) {
@@ -27,6 +22,9 @@ if (-not (Test-VMRunning -Name $vmName)) {
 }
 
 $ep = Get-VMSshEndpoint -Name $vmName
+if (-not $ep) {
+    Write-LogDie "无法获取 VM SSH 端点"
+}
 $vmHost = $ep.Host
 $vmPort = $ep.Port
 
@@ -37,7 +35,7 @@ if (-not (Test-Path -LiteralPath $sshKeyPath)) {
 Set-SSHKeyPath -Path $sshKeyPath
 $sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
 $scpExe = (Get-Command scp.exe -ErrorAction Stop).Source
-$baseArgs = (Get-SshBaseArgs) + @('-p', "$vmPort")
+$baseArgs = @('-A') + (Get-SshBaseArgs) + @('-p', "$vmPort")
 $scpBaseArgs = (Get-SshBaseArgs) + @('-P', "$vmPort")
 
 # 同步 Chrome/Chromium 书签到 VM
@@ -47,13 +45,10 @@ if (Test-Path -LiteralPath $bookmarksJson) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
 
-    # 清理旧的 ManagedBookmarks 策略文件（它会创建独立的托管书签文件夹，不是我们想要的）
     $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'sudo rm -f /etc/opt/chrome/policies/managed/bookmarks.json /etc/chromium/policies/managed/bookmarks.json' 2>&1
 
-    # 上传书签 JSON 到 VM
     $null = & $scpExe @scpBaseArgs $bookmarksJson "${vmUser}@${vmHost}:/tmp/_managed_bookmarks.json" 2>&1
 
-    # 直接注入到 Chrome/Chromium 的 Bookmarks 文件（支持首次启动前 profile 目录不存在的情况）
     $pyScript = @'
 import json, sys, os, uuid, time, shutil, subprocess
 src = sys.argv[1] if len(sys.argv) > 1 else "/tmp/_managed_bookmarks.json"
@@ -104,36 +99,15 @@ with open(bp, "w") as f: json.dump(bk, f, ensure_ascii=False, indent=3)
     if ($LASTEXITCODE -eq 0) { Write-LogOk '书签已同步' } else { Write-LogWarn '书签同步失败，继续启动' }
 }
 
-function Find-VcXsrvExe {
-    $names = @(
-        (Join-Path $env:ProgramFiles 'VcXsrv\vcxsrv.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'VcXsrv\vcxsrv.exe')
-    )
-    foreach ($p in $names) {
-        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
-    }
-    $cmd = Get-Command vcxsrv.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    return $null
-}
-
 # --- 主路径：VcXsrv + X11 转发 ---
 $vcxsrv = Find-VcXsrvExe
-if (-not $vcxsrv) {
-    Write-LogWarn '未找到 VcXsrv，尝试 winget 安装...'
-    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-        try {
-            & winget.exe install --id marha.VcXsrv -e --source winget --accept-package-agreements --accept-source-agreements 2>$null
-        }
-        catch { }
-        Start-Sleep -Seconds 3
-        $vcxsrv = Find-VcXsrvExe
-    }
-}
 
-# 自动检测浏览器：Chrome → chromium-browser → chromium (snap) → Flatpak Chromium
 $browserBin = 'google-chrome-stable'
 $browserFlags = '--no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN'
+$chromeNoFirstRun = $env:CHROME_NO_FIRST_RUN
+if ($chromeNoFirstRun -eq '1') {
+    $browserFlags += ' --no-first-run --no-default-browser-check'
+}
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'SilentlyContinue'
 $checkOut = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'command -v google-chrome-stable' 2>&1
@@ -189,7 +163,7 @@ if ($vcxsrv) {
     exit $LASTEXITCODE
 }
 
-# --- 回退：xpra HTML5（需在客户机已安装 xpra，可由扩展脚本安装）---
+# --- 回退：xpra HTML5 ---
 Write-LogWarn 'VcXsrv 不可用，改用 xpra HTML5（浏览器打开）...'
 $bashOneLiner = "export LANGUAGE=zh_CN LANG=zh_CN.UTF-8; xpra stop :100 2>/dev/null || true; nohup xpra start :100 --bind-tcp=0.0.0.0:10000 --start-child=`"$browserBin $browserFlags`" --html5=on --daemon=yes </dev/null >/tmp/xpra-chrome.log 2>&1 & echo ok"
 

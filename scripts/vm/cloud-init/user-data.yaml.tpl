@@ -11,7 +11,7 @@ users:
     ssh_authorized_keys:
       - ${SSH_PUBLIC_KEY}
 
-# 禁止密码登录，仅允许 SSH 密钥认证
+# SSH 密钥认证 + 允许控制台密码登录（用于调试）
 ssh_pwauth: false
 
 timezone: Asia/Shanghai
@@ -43,7 +43,7 @@ packages:
   - lsb-release
   - apt-transport-https
   - software-properties-common
-  - qemu-guest-agent
+  - ${GUEST_AGENT_PKG}
 
 write_files:
   - path: /opt/setup-docker.sh
@@ -67,8 +67,8 @@ write_files:
         > /etc/apt/sources.list.d/docker.list
 
       echo "[3/4] Installing Docker Engine..."
-      apt-get update -qq
-      apt-get install -y -qq \
+      apt-get update -q
+      apt-get install -y -q \
         docker-ce \
         docker-ce-cli \
         containerd.io \
@@ -84,7 +84,12 @@ write_files:
       docker compose version
 
 runcmd:
-  - systemctl enable --now qemu-guest-agent
+  - |
+    if [ "${GUEST_AGENT_SVC}" = "hv-kvp-daemon" ]; then
+      apt-get install -y -q linux-cloud-tools-$(uname -r) || true
+      udevadm trigger --subsystem-match=misc
+    fi
+  - systemctl enable --now ${GUEST_AGENT_SVC} || true
   - export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a && bash /opt/setup-docker.sh
   - echo "CLOUDINIT_SETUP_COMPLETE" > /var/log/cloud-init-done.log
 

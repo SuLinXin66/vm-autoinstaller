@@ -21,5 +21,8 @@ var (
 	DefaultAPTMirror            = ""
 	DefaultCNMode               = "0"
 	DefaultGitHubProxy          = ""
-	DefaultSSHForward           = "0"
+	DefaultSSHForward            = "0"
+	DefaultChromeNoFirstRun      = "0"
+	DefaultHypervisor            = "auto"
+	DefaultHyperVAutoStopService = "0"
 )

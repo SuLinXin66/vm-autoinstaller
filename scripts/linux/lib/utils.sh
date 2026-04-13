@@ -127,9 +127,9 @@ utils::get_project_root() {
     local dir
     dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 
-    # Walk upward until we find config.env or hit /
+    # Walk upward until we find vm/ directory or hit /
     while [[ "$dir" != "/" ]]; do
-        if [[ -f "${dir}/config.env" ]]; then
+        if [[ -d "${dir}/vm" ]]; then
             echo "$dir"
             return 0
         fi

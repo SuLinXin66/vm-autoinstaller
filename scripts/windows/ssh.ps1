@@ -1,21 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
-# 使用密钥交互式 SSH 登录 VM（UserKnownHostsFile=NUL 等价于 Linux 下 /dev/null）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
-$RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
-$VMDir = Join-Path $RepoRoot 'vm'
 
 Get-ChildItem (Join-Path $_ScriptDir 'lib\*.psm1') | Sort-Object Name | ForEach-Object { Import-Module $_.FullName -Force -Global }
 
-if (-not (Test-ConfigExists)) {
-    Write-LogError 'config.env 不存在'
-    exit 1
-}
-
-$cfg = Read-ProjectConfig
-$vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'
-$dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
+$vmName = $env:VM_NAME
+$vmUser = $env:VM_USER
+$dataDir = $env:DATA_DIR
+if (-not $dataDir) { $dataDir = Join-Path $env:USERPROFILE '.kvm-ubuntu' }
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 if (-not (Test-VMExists -Name $vmName)) {
@@ -27,6 +19,9 @@ if (-not (Test-VMRunning -Name $vmName)) {
 }
 
 $ep = Get-VMSshEndpoint -Name $vmName
+if (-not $ep) {
+    Write-LogDie "无法获取 VM SSH 端点（IP 尚未分配，请稍后重试）"
+}
 $vmHost = $ep.Host
 $vmPort = $ep.Port
 
@@ -37,7 +32,7 @@ if (Test-Path -LiteralPath $sshKeyPath) {
 }
 
 $sshExe = (Get-Command ssh.exe -ErrorAction Stop).Source
-$sshArgs = (Get-SshBaseArgs) + @('-p', "$vmPort", "${vmUser}@${vmHost}")
+$sshArgs = @('-A') + (Get-SshBaseArgs) + @('-p', "$vmPort", "${vmUser}@${vmHost}")
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'

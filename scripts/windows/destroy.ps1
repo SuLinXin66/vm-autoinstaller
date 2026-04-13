@@ -1,9 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 
-# 销毁 VM 并清理数据目录中的密钥与残留文件
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
-$RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
-$VMDir = Join-Path $RepoRoot 'vm'
 
 Get-ChildItem (Join-Path $_ScriptDir 'lib\*.psm1') | Sort-Object Name | ForEach-Object { Import-Module $_.FullName -Force -Global }
 
@@ -16,14 +13,9 @@ foreach ($a in $args) {
     }
 }
 
-if (-not (Test-ConfigExists)) {
-    Write-LogError 'config.env 不存在'
-    exit 1
-}
-
-$cfg = Read-ProjectConfig
-$vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
+$vmName = $env:VM_NAME
+$dataDir = $env:DATA_DIR
+if (-not $dataDir) { $dataDir = Join-Path $env:USERPROFILE '.kvm-ubuntu' }
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 
 Write-LogBanner -Title "销毁 VM: $vmName"
@@ -33,7 +25,7 @@ if (-not (Test-VMExists -Name $vmName)) {
     exit 0
 }
 
-if (-not (Request-UserConfirmation -Prompt "确认销毁 VM [$vmName] 及其所有数据?" -Config $cfg)) {
+if (-not (Request-UserConfirmation -Prompt "确认销毁 VM [$vmName] 及其所有数据?")) {
     Write-LogInfo '已取消'
     exit 0
 }
@@ -48,3 +40,5 @@ if ((Test-Path -LiteralPath $sshKeyPath) -or (Test-Path -LiteralPath "$sshKeyPat
 }
 
 Write-LogBanner -Title '清理完成'
+
+Stop-HypervisorService

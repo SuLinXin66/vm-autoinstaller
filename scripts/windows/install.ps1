@@ -1,16 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
-# 仓库路径与 vm 目录（与 linux 脚本语义一致）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
 $VMDir = Join-Path $RepoRoot 'vm'
 
 Get-ChildItem (Join-Path $_ScriptDir 'lib\*.psm1') | Sort-Object Name | ForEach-Object { Import-Module $_.FullName -Force -Global }
 
-# 参数：-y / --yes 跳过确认
-$autoYesCli = $false
 foreach ($a in $args) {
-    if ($a -eq '-y' -or $a -eq '--yes') { $autoYesCli = $true }
+    if ($a -eq '-y' -or $a -eq '--yes') { $env:AUTO_YES = '1' }
     if ($a -eq '-h' -or $a -eq '--help') {
         Write-Host @'
 用法: .\install.ps1 [-y|--yes] [-h|--help]
@@ -18,54 +15,52 @@ foreach ($a in $args) {
 选项:
   -y, --yes    跳过确认提示
   -h, --help   显示帮助
-
-配置: 编辑 vm\config.env
 '@
         exit 0
     }
 }
-if ($autoYesCli) { $env:AUTO_YES = '1' }
 
-$cfg = Read-ProjectConfig
+$vmName    = $env:VM_NAME
+$vmCpus    = [int]$env:VM_CPUS
+if ($vmCpus -le 0) { $vmCpus = [int]$env:NUMBER_OF_PROCESSORS }
+$vmMem     = [int]$env:VM_MEMORY
+$vmDiskGb  = [int]$env:VM_DISK_SIZE
+$vmUser    = $env:VM_USER
+$ubuntuVer = $env:UBUNTU_VERSION
+$netMode   = $env:NETWORK_MODE
+$bridgeName = $env:BRIDGE_NAME
+$dataDir   = $env:DATA_DIR
+if (-not $dataDir) { $dataDir = Join-Path $env:USERPROFILE ".kvm-ubuntu" }
+$imgBase   = $env:UBUNTU_IMAGE_BASE_URL
+$proxy     = $env:PROXY
+$aptMirror = $env:APT_MIRROR
+$cnMode    = $env:CN_MODE
+$githubProxy = $env:GITHUB_PROXY
 
-# 默认值（与用户需求一致；config.env 可覆盖）
-$vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$vmCpus = [int](Get-ConfigValue -Config $cfg -Key 'VM_CPUS' -Default '0')
-if ($vmCpus -le 0) {
-    $vmCpus = [int]$env:NUMBER_OF_PROCESSORS
-}
-$vmMem = [int](Get-ConfigValue -Config $cfg -Key 'VM_MEMORY' -Default '2048')
-$vmDiskGb = [int](Get-ConfigValue -Config $cfg -Key 'VM_DISK_SIZE' -Default '20')
-$vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'
-$ubuntuVer = Get-ConfigValue -Config $cfg -Key 'UBUNTU_VERSION' -Default '24.04'
-$netMode = Get-ConfigValue -Config $cfg -Key 'NETWORK_MODE' -Default 'nat'
-$bridgeName = Get-ConfigValue -Config $cfg -Key 'BRIDGE_NAME' -Default 'br0'
-$dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
-$imgBase = Get-ConfigValue -Config $cfg -Key 'UBUNTU_IMAGE_BASE_URL' -Default 'https://cloud-images.ubuntu.com/releases'
-$proxy = Get-ConfigValue -Config $cfg -Key 'PROXY' -Default ''
-$aptMirror = Get-ConfigValue -Config $cfg -Key 'APT_MIRROR' -Default ''
-$cnMode = Get-ConfigValue -Config $cfg -Key 'CN_MODE' -Default '0'
-$githubProxy = Get-ConfigValue -Config $cfg -Key 'GITHUB_PROXY' -Default ''
-
-# CN_MODE 联动：如果未显式设置 APT_MIRROR，自动使用 ustc
 if ($cnMode -eq '1' -and -not $aptMirror) {
     $aptMirror = 'ustc'
 }
+
+$hypervisorType = Get-HypervisorType
+$diskExt = if ($hypervisorType -eq 'hyperv') { 'vhdx' } else { 'vdi' }
 
 $cloudArch = 'amd64'
 $imageName = "ubuntu-${ubuntuVer}-server-cloudimg-${cloudArch}.img"
 $imageUrl = "$imgBase/$ubuntuVer/release/$imageName"
 $imagePath = Join-Path $dataDir $imageName
-$vdiPath = Join-Path $dataDir "$vmName.vdi"
+$diskPath = Join-Path $dataDir "$vmName.$diskExt"
 $seedIso = Join-Path $dataDir "${vmName}-seed.iso"
 $userDataYaml = Join-Path $dataDir 'user-data.yaml'
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
 $tplPath = Join-Path $VMDir 'cloud-init\user-data.yaml.tpl'
 
+$hypervisorLabel = if ($hypervisorType -eq 'hyperv') { 'Hyper-V' } else { 'VirtualBox' }
+
 Set-LogTotalSteps -Total 5
-Write-LogBanner -Title 'VirtualBox Ubuntu Server 自动化安装'
+Write-LogBanner -Title "$hypervisorLabel Ubuntu Server 自动化安装"
 
 Write-Host "  VM 名称:    $vmName"
+Write-Host "  后端:       $hypervisorLabel"
 Write-Host "  CPU:        $vmCpus 核"
 Write-Host "  内存:       $vmMem MB"
 Write-Host "  磁盘:       $vmDiskGb GB"
@@ -77,7 +72,7 @@ if ($proxy) { Write-Host "  代理:       $proxy" }
 if ($aptMirror) { Write-Host "  APT 镜像:   $aptMirror" }
 Write-Host ''
 
-if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?' -Config $cfg)) {
+if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?')) {
     Write-LogInfo '已取消'
     exit 0
 }
@@ -85,9 +80,9 @@ if (-not (Request-UserConfirmation -Prompt '确认以上配置并开始安装?' 
 # --- 0) Nerd Font ---
 Install-NerdFont
 
-# --- 1) VirtualBox ---
-Write-LogStep '安装 / 检测 VirtualBox'
-Install-VirtualBox
+# --- 1) Hypervisor ---
+Write-LogStep "安装 / 检测 $hypervisorLabel"
+Initialize-Hypervisor
 
 # --- 2) 下载云镜像 ---
 Write-LogStep '下载 Ubuntu Cloud Image'
@@ -100,20 +95,19 @@ Invoke-FileDownload -Uri $imageUrl -DestinationPath $imagePath -Description "Ubu
 Write-LogStep '准备 VM 磁盘与 cloud-init'
 if (Test-VMExists -Name $vmName) {
     Write-LogWarn "VM [$vmName] 已存在"
-    if (-not (Request-UserConfirmation -Prompt '是否销毁现有 VM 并重新创建?' -Config $cfg)) {
+    if (-not (Request-UserConfirmation -Prompt '是否销毁现有 VM 并重新创建?')) {
         Write-LogInfo '已取消'
         exit 0
     }
     Remove-VM -Name $vmName -DataDir $dataDir
 }
 
-# --- 4) 转 VDI 并扩容 ---
-New-VMDisk -SourceQcow2 $imagePath -DestinationVdi $vdiPath -SizeGB $vmDiskGb
+# --- 4) 转换磁盘 ---
+New-VMDisk -SourceImage $imagePath -DestinationPath $diskPath -SizeGB $vmDiskGb
 
 # --- 5) SSH 密钥 ---
 if (-not (Test-Path -LiteralPath $sshKeyPath)) {
     $sshKeygen = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
-    # PowerShell 5.1 传递空字符串给原生命令时会被丢弃，用 Start-Process 确保 -N "" 正确传递
     $keygenArgs = "-t ed25519 -f `"$sshKeyPath`" -N `"`" -q"
     $proc = Start-Process -FilePath $sshKeygen -ArgumentList $keygenArgs -Wait -NoNewWindow -PassThru
     if ($proc.ExitCode -ne 0) { throw 'ssh-keygen 失败' }
@@ -123,7 +117,6 @@ $pubPath = "$sshKeyPath.pub"
 $sshPublicKey = (Get-Content -LiteralPath $pubPath -Raw).Trim()
 Write-LogInfo "SSH 公钥: $($sshPublicKey.Substring(0, [Math]::Min(60, $sshPublicKey.Length)))..."
 
-# 验证密钥无密码短语（PowerShell 5.1 空字符串传递可能出错）
 $sshKeygen2 = (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue).Source
 if ($sshKeygen2) {
     $prevEAP = $ErrorActionPreference
@@ -148,12 +141,12 @@ if (-not (Test-Path -LiteralPath $tplPath)) {
 }
 Write-LogInfo '生成 cloud-init 配置...'
 $tpl = Get-Content -LiteralPath $tplPath -Raw -Encoding UTF8
-$rendered = $tpl.Replace('${VM_NAME}', $vmName).Replace('${VM_USER}', $vmUser).Replace('${SSH_PUBLIC_KEY}', $sshPublicKey)
-# cloud-init 不兼容 UTF-8 BOM，必须写入无 BOM 的 UTF-8
+$guestPkg = if ($hypervisorType -eq 'hyperv') { 'linux-cloud-tools-virtual' } else { 'qemu-guest-agent' }
+$guestSvc = if ($hypervisorType -eq 'hyperv') { 'hv-kvp-daemon' } else { 'qemu-guest-agent' }
+$rendered = $tpl.Replace('${VM_NAME}', $vmName).Replace('${VM_USER}', $vmUser).Replace('${SSH_PUBLIC_KEY}', $sshPublicKey).Replace('${GUEST_AGENT_PKG}', $guestPkg).Replace('${GUEST_AGENT_SVC}', $guestSvc)
 $rendered = $rendered.Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText($userDataYaml, $rendered, [System.Text.UTF8Encoding]::new($false))
 
-# Inject proxy into cloud-init if configured
 if ($proxy) {
     Write-LogInfo "注入代理配置: $proxy"
     $proxyAptLines = "  http_proxy: `"$proxy`"`n  https_proxy: `"$proxy`""
@@ -179,7 +172,6 @@ if ($proxy) {
     Write-LogOk '代理已注入 cloud-init'
 }
 
-# Inject APT mirror into cloud-init if configured
 if ($aptMirror) {
     $mirrorUbuntuUrl = ''
     $mirrorDockerUrl = ''
@@ -208,7 +200,6 @@ if ($aptMirror) {
     }
 }
 
-# 验证 user-data 中包含 SSH 公钥
 $writtenContent = [System.IO.File]::ReadAllText($userDataYaml, [System.Text.UTF8Encoding]::new($false))
 if ($writtenContent -match 'ssh-ed25519') {
     Write-LogOk 'cloud-init user-data 已包含 SSH 公钥'
@@ -223,7 +214,7 @@ New-SeedISO -UserDataPath $userDataYaml -SeedIsoPath $seedIso
 Write-LogStep '创建并启动 VM'
 $consoleLog = Join-Path $dataDir 'console.log'
 $net = if ($netMode -eq 'bridge') { 'bridge' } else { 'nat' }
-Install-VM -Name $vmName -VDIPath $vdiPath -SeedISOPath $seedIso -MemoryMB $vmMem -CpuCount $vmCpus `
+Install-VM -Name $vmName -DiskPath $diskPath -SeedISOPath $seedIso -MemoryMB $vmMem -CpuCount $vmCpus `
     -NetworkMode $net -BridgeAdapter $(if ($net -eq 'bridge') { $bridgeName } else { '' }) `
     -ConsoleLogPath $consoleLog
 

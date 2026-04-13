@@ -11,8 +11,28 @@ import (
 	"time"
 
 	"github.com/SuLinXin66/vm-autoinstaller/internal/buildinfo"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/config"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 )
+
+// buildConfigEnv loads config.env, merges with KnownKeys defaults,
+// and returns a slice of KEY=VALUE strings for subprocess injection.
+func buildConfigEnv() []string {
+	cfg, _ := config.ReadEnv(paths.ConfigEnvPath())
+	if cfg == nil {
+		cfg = make(map[string]string)
+	}
+	envs := make([]string, 0, len(config.KnownKeys)+1)
+	for key, meta := range config.KnownKeys {
+		val := meta.DefaultValue
+		if v, ok := cfg[key]; ok && v != "" {
+			val = v
+		}
+		envs = append(envs, key+"="+val)
+	}
+	envs = append(envs, "APP_NAME="+buildinfo.AppName)
+	return envs
+}
 
 func RunScript(name string, args ...string) error {
 	scriptDir := paths.ScriptDir()
@@ -34,7 +54,7 @@ func runUnix(ctx context.Context, scriptDir, name string, args ...string) error 
 		return fmt.Errorf("脚本不存在: %s", script)
 	}
 	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
-	cmd.Env = append(os.Environ(), "APP_NAME="+buildinfo.AppName)
+	cmd.Env = append(os.Environ(), buildConfigEnv()...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -46,19 +66,20 @@ func runUnix(ctx context.Context, scriptDir, name string, args ...string) error 
 	return cmd.Run()
 }
 
-func runWindows(ctx context.Context, scriptDir, name string, args ...string) error {
+func runWindows(_ context.Context, scriptDir, name string, args ...string) error {
+	return runWindowsDirect(scriptDir, name, args...)
+}
+
+func runWindowsDirect(scriptDir, name string, args ...string) error {
 	ps1 := filepath.Join(scriptDir, name+".ps1")
-	if _, err := os.Stat(ps1); err != nil {
-		return fmt.Errorf("脚本不存在: %s", ps1)
-	}
 	psArgs := []string{
 		"-ExecutionPolicy", "Bypass",
 		"-NoProfile",
 		"-File", ps1,
 	}
 	psArgs = append(psArgs, args...)
-	cmd := exec.CommandContext(ctx, "powershell.exe", psArgs...)
-	cmd.Env = append(os.Environ(), "APP_NAME="+buildinfo.AppName)
+	cmd := exec.Command("powershell.exe", psArgs...)
+	cmd.Env = append(os.Environ(), buildConfigEnv()...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

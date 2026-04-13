@@ -23,7 +23,10 @@ LDFLAGS  := -s -w \
   -X '$(MODULE)/internal/buildinfo.DefaultAPTMirror=$(DEFAULT_APT_MIRROR)' \
   -X '$(MODULE)/internal/buildinfo.DefaultCNMode=$(DEFAULT_CN_MODE)' \
   -X '$(MODULE)/internal/buildinfo.DefaultGitHubProxy=$(DEFAULT_GITHUB_PROXY)' \
-  -X '$(MODULE)/internal/buildinfo.DefaultSSHForward=$(DEFAULT_SSH_FORWARD)'
+  -X '$(MODULE)/internal/buildinfo.DefaultSSHForward=$(DEFAULT_SSH_FORWARD)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultChromeNoFirstRun=$(DEFAULT_CHROME_NO_FIRST_RUN)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultHypervisor=$(DEFAULT_HYPERVISOR)' \
+  -X '$(MODULE)/internal/buildinfo.DefaultHyperVAutoStopService=$(DEFAULT_HYPERV_AUTO_STOP_SERVICE)'
 
 PLATFORMS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 DIST      := dist
@@ -73,6 +76,9 @@ installer: cli
 			-e 's|^CN_MODE=.*|CN_MODE=$(DEFAULT_CN_MODE)|' \
 			-e 's|^GITHUB_PROXY=.*|GITHUB_PROXY=$(DEFAULT_GITHUB_PROXY)|' \
 			-e 's|^SSH_FORWARD=.*|SSH_FORWARD=$(DEFAULT_SSH_FORWARD)|' \
+			-e 's|^CHROME_NO_FIRST_RUN=.*|CHROME_NO_FIRST_RUN=$(DEFAULT_CHROME_NO_FIRST_RUN)|' \
+			-e 's|^HYPERVISOR=.*|HYPERVISOR="$(DEFAULT_HYPERVISOR)"|' \
+			-e 's|^HYPERV_AUTO_STOP_SERVICE=.*|HYPERV_AUTO_STOP_SERVICE=$(DEFAULT_HYPERV_AUTO_STOP_SERVICE)|' \
 			"$$staging/vm/config.env.example"; \
 		cp "$(DIST)/cli/$${os}_$${arch}/$(APP_NAME)$$ext" "$$staging/_cli/$(APP_NAME)$$ext"; \
 		echo "  BUILD  installer $$os/$$arch"; \

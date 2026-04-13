@@ -12,13 +12,6 @@ source "${PROJECT_ROOT}/lib/pkg.sh"
 source "${PROJECT_ROOT}/lib/utils.sh"
 source "${PROJECT_ROOT}/lib/vm.sh"
 
-# Load configuration
-if [[ ! -f "${REPO_ROOT}/vm/config.env" ]]; then
-    log::die "配置文件 config.env 不存在，请先复制模板：cp vm/config.env.example vm/config.env"
-fi
-source "${REPO_ROOT}/vm/config.env"
-
-# Allow environment variable overrides
 VM_NAME="${VM_NAME:-ubuntu-server}"
 VM_CPUS="${VM_CPUS:-0}"
 if [[ "$VM_CPUS" == "0" || -z "$VM_CPUS" ]]; then
@@ -68,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -y, --yes    跳过确认提示，自动执行"
             echo "  -h, --help   显示帮助信息"
             echo ""
-            echo "配置: 编辑 config.env 或通过环境变量覆盖"
+            echo "配置: 通过 ${APP_NAME:-kvm-ubuntu} config set 修改"
             exit 0
             ;;
         *)
@@ -200,7 +193,9 @@ SSH_PUBLIC_KEY="$(cat "${SSH_KEY_PATH}.pub")"
 # Render cloud-init template
 log::info "生成 cloud-init 配置..."
 export VM_NAME VM_USER SSH_PUBLIC_KEY
-envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY}' \
+export GUEST_AGENT_PKG="qemu-guest-agent"
+export GUEST_AGENT_SVC="qemu-guest-agent"
+envsubst '${VM_NAME} ${VM_USER} ${SSH_PUBLIC_KEY} ${GUEST_AGENT_PKG} ${GUEST_AGENT_SVC}' \
     < "${REPO_ROOT}/vm/cloud-init/user-data.yaml.tpl" > "$USER_DATA"
 
 # Inject proxy config into cloud-init if configured

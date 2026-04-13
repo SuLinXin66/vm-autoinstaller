@@ -65,6 +65,9 @@ var KnownKeys = map[string]KeyMeta{
 	"CN_MODE":                {Description: "国内模式 (1=自动使用国内镜像/加速站)", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultCNMode},
 	"GITHUB_PROXY":           {Description: "GitHub 加速前缀 (如 https://ghfast.top/)", EffectLevel: LevelNone, Type: TypeString, DefaultValue: buildinfo.DefaultGitHubProxy},
 	"SSH_FORWARD":            {Description: "SSH 密钥/配置映射到 VM", EffectLevel: LevelRestart, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultSSHForward},
+	"CHROME_NO_FIRST_RUN":      {Description: "Chrome 跳过首次运行体验", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultChromeNoFirstRun},
+	"HYPERVISOR":               {Description: "虚拟化后端 (auto=自动检测)", EffectLevel: LevelRebuild, Type: TypeEnum, EnumValues: []string{"auto", "hyperv", "vbox"}, DefaultValue: buildinfo.DefaultHypervisor},
+	"HYPERV_AUTO_STOP_SERVICE": {Description: "VM 停止后自动关闭 Hyper-V 服务", EffectLevel: LevelNone, Type: TypeEnum, EnumValues: []string{"0", "1"}, DefaultValue: buildinfo.DefaultHyperVAutoStopService},
 }
 
 func init() {

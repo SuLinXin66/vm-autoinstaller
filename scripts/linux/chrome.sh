@@ -13,9 +13,6 @@ source "${PROJECT_ROOT}/lib/sys.sh"
 source "${PROJECT_ROOT}/lib/pkg.sh"
 source "${PROJECT_ROOT}/lib/vm.sh"
 
-[[ -f "${REPO_ROOT}/vm/config.env" ]] || { echo "错误: config.env 不存在，请先 cp vm/config.env.example vm/config.env" >&2; exit 1; }
-source "${REPO_ROOT}/vm/config.env"
-
 VM_NAME="${VM_NAME:-ubuntu-server}"
 VM_USER="${VM_USER:-wpsweb}"
 DATA_DIR="${DATA_DIR:-${HOME}/.kvm-ubuntu}"
@@ -379,6 +376,9 @@ SSH_OPTS="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFi
 _ssh_opts_detect=(-i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
 _browser="google-chrome-stable"
 _browser_flags="--no-sandbox --disable-gpu --disable-features=SendMouseLeaveEvents --lang=zh-CN"
+if [[ "${CHROME_NO_FIRST_RUN:-0}" == "1" ]]; then
+    _browser_flags+=" --no-first-run --no-default-browser-check"
+fi
 if ! ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "command -v google-chrome-stable" &>/dev/null; then
     if ssh "${_ssh_opts_detect[@]}" "${VM_USER}@${ip}" "command -v chromium-browser" &>/dev/null; then
         _browser="chromium-browser"

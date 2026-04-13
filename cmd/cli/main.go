@@ -22,6 +22,7 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/pathmgr"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/runner"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/share"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/winsvc"
 )
 
 func main() {
@@ -76,6 +77,8 @@ func newRootCmd() *cobra.Command {
 		newUpgradeCmd(),
 		newUninstallCmd(),
 		newGenCompletionCmd(root),
+		newSvcCmd(),
+		newSvcInstallCmd(),
 	)
 
 	return root
@@ -143,6 +146,76 @@ Register-ArgumentCompleter -Native -CommandName '%[1]s.exe' -ScriptBlock $__%[2]
 
 	_, err := os.Stdout.WriteString(script)
 	return err
+}
+
+// --- _svc (hidden, Windows Service entry point for SCM) ---
+
+func newSvcCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "_svc",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return winsvc.Run()
+		},
+	}
+}
+
+// --- _svc-install (hidden, called by installer via elevated PowerShell) ---
+
+func newSvcInstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "_svc-install",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logPath := svcInstallLogPath()
+			logf := openSvcInstallLog(logPath)
+			defer logf.Close()
+
+			cliPath := paths.CLIPath()
+			logf.WriteString("cli_path: " + cliPath + "\n")
+
+			if err := winsvc.Install(cliPath); err != nil {
+				logf.WriteString("install_error: " + err.Error() + "\n")
+				return fmt.Errorf("注册服务失败: %w", err)
+			}
+			logf.WriteString("install: ok\n")
+
+			if err := winsvc.EnsureRunning(); err != nil {
+				logf.WriteString("start_error: " + err.Error() + "\n")
+				return fmt.Errorf("启动服务失败: %w", err)
+			}
+			logf.WriteString("start: ok\n")
+			logf.WriteString("done\n")
+			return nil
+		},
+	}
+}
+
+func svcInstallLogPath() string {
+	return filepath.Join(os.TempDir(), "kvm-ubuntu-svc-install.log")
+}
+
+type svcInstallLog struct {
+	f *os.File
+}
+
+func (l *svcInstallLog) WriteString(s string) {
+	if l.f != nil {
+		l.f.WriteString(s)
+	}
+}
+func (l *svcInstallLog) Close() {
+	if l.f != nil {
+		l.f.Close()
+	}
+}
+
+func openSvcInstallLog(path string) *svcInstallLog {
+	f, err := os.Create(path)
+	if err != nil {
+		return &svcInstallLog{}
+	}
+	return &svcInstallLog{f: f}
 }
 
 // --- SSH (root + explicit) ---
@@ -954,9 +1027,23 @@ func runUninstall(force bool) error {
 	}
 
 	totalSteps := 4
+	if runtime.GOOS == "windows" {
+		totalSteps = 5
+	}
 	step := 0
 
-	// Step 1: Destroy VM
+	// Step 0 (Windows only): Remove the elevation service
+	if runtime.GOOS == "windows" {
+		step++
+		fmt.Printf("[%d/%d] 卸载提权服务...\n", step, totalSteps)
+		if err := winsvc.Uninstall(); err != nil {
+			fmt.Printf("⚠ 服务卸载失败: %v\n", err)
+		} else {
+			fmt.Println("  ✓ 完成")
+		}
+	}
+
+	// Destroy VM
 	step++
 	fmt.Printf("[%d/%d] 销毁 VM...\n", step, totalSteps)
 	if err := runner.RunScript("destroy", "-y"); err != nil {

@@ -1,30 +1,24 @@
 $ErrorActionPreference = 'Stop'
 
-# 扩展脚本：推送 vm\extensions\*.sh 到客户机并顺序执行（跳过 20-example.sh）
 $_ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $RepoRoot = (Resolve-Path (Join-Path $_ScriptDir '..')).Path
 $VMDir = Join-Path $RepoRoot 'vm'
 
 Get-ChildItem (Join-Path $_ScriptDir 'lib\*.psm1') | Sort-Object Name | ForEach-Object { Import-Module $_.FullName -Force -Global }
 
-if (-not (Test-ConfigExists)) {
-    Write-LogError 'config.env 不存在'
-    exit 1
-}
-
-$cfg = Read-ProjectConfig
-$vmName = Get-ConfigValue -Config $cfg -Key 'VM_NAME' -Default 'ubuntu-server'
-$vmUser = Get-ConfigValue -Config $cfg -Key 'VM_USER' -Default 'wpsweb'
-$dataDir = Get-ConfigValue -Config $cfg -Key 'DATA_DIR' -Default (Join-Path $env:USERPROFILE '.kvm-ubuntu')
+$vmName     = $env:VM_NAME
+$vmUser     = $env:VM_USER
+$dataDir    = $env:DATA_DIR
+if (-not $dataDir) { $dataDir = Join-Path $env:USERPROFILE '.kvm-ubuntu' }
 $sshKeyPath = Join-Path $dataDir 'id_ed25519'
-$cnMode = Get-ConfigValue -Config $cfg -Key 'CN_MODE' -Default '0'
-$githubProxy = Get-ConfigValue -Config $cfg -Key 'GITHUB_PROXY' -Default ''
+$cnMode     = $env:CN_MODE
+$githubProxy = $env:GITHUB_PROXY
 
 $extDir = Join-Path $VMDir 'extensions'
 $remoteDir = '/opt/kvm-extensions/scripts'
 $markerDir = '/opt/kvm-extensions'
 
-Install-VirtualBox
+Initialize-Hypervisor
 
 if (-not (Test-VMExists -Name $vmName)) {
     Write-LogDie "VM [$vmName] 不存在，请先运行 $env:APP_NAME setup"
@@ -69,7 +63,6 @@ $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" "sudo mkdir -p $remoteDir $mar
 $ErrorActionPreference = $prevEAP
 if ($LASTEXITCODE -ne 0) { throw '无法在 VM 上创建扩展目录' }
 
-# 传输 VM 侧公共 lib
 $libDir = Join-Path $VMDir 'lib'
 if (Test-Path -LiteralPath $libDir) {
     $libFiles = Get-ChildItem -LiteralPath $libDir -Filter '*.sh' -File -ErrorAction SilentlyContinue
@@ -157,7 +150,7 @@ if ($skip -eq $scripts.Count) {
     Write-LogWarn "失败的扩展: $($failNames -join ', ')"
 }
 
-# ── 同步项目内置配置到 VM ──────────────────────────────────
+# 同步内置配置到 VM
 $dotfilesDir = Join-Path $VMDir 'config\dotfiles'
 
 if (Test-Path -LiteralPath $dotfilesDir) {

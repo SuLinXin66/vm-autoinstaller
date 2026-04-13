@@ -86,9 +86,17 @@ func run() error {
 	if runtime.GOOS == "windows" {
 		perm = 0o644
 	}
-	if err := os.WriteFile(cliPath, cliData, perm); err != nil {
+	// On Windows the old service may hold a lock on cliPath.
+	// Write to a temp file first; installAndStartService will
+	// elevate, stop the service, swap the file, then re-register.
+	writePath := cliPath
+	if runtime.GOOS == "windows" {
+		writePath = cliPath + ".new"
+	}
+	if err := os.WriteFile(writePath, cliData, perm); err != nil {
 		return fmt.Errorf("写入 CLI 失败: %v", err)
 	}
+	installAndStartService(cliPath)
 	fmt.Println("  ✓ 完成")
 
 	step++

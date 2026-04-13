@@ -12,9 +12,6 @@ source "${PROJECT_ROOT}/lib/log.sh"
 source "${PROJECT_ROOT}/lib/sudo.sh"
 source "${PROJECT_ROOT}/lib/vm.sh"
 
-[[ -f "${REPO_ROOT}/vm/config.env" ]] || { echo "错误: config.env 不存在，请先 cp vm/config.env.example vm/config.env" >&2; exit 1; }
-source "${REPO_ROOT}/vm/config.env"
-
 VM_NAME="${VM_NAME:-ubuntu-server}"
 
 if vm::exists "$VM_NAME"; then

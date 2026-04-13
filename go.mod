@@ -3,6 +3,7 @@ module github.com/SuLinXin66/vm-autoinstaller
 go 1.25.6
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/gookit/color v1.6.0
 	github.com/jedib0t/go-pretty/v6 v6.7.8

@@ -1,33 +1,30 @@
-﻿# VirtualBox VM 生命周期与介质准备（对齐 linux/lib/vm.sh 的语义，CLI 为 VBoxManage）
+﻿# VM Facade：统一 API + 通用函数（SSH、seed ISO、VcXsrv）
+# 虚拟化操作委托给 Hypervisor.psm1 选定的后端（HyperV.psm1 / VBox.psm1）
 $ErrorActionPreference = 'Stop'
 
 $_ModDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 Import-Module (Join-Path $_ModDir 'Log.psm1') -Force -Global
 Import-Module (Join-Path $_ModDir 'Utils.psm1') -Force -Global
+Import-Module (Join-Path $_ModDir 'Hypervisor.psm1') -Force -Global
+Import-Module (Join-Path $_ModDir 'HyperV.psm1') -Force -Global
+Import-Module (Join-Path $_ModDir 'VBox.psm1') -Force -Global
 
-$script:VBoxManagePath = $null
+# ============================================================
+# SSH 通用配置
+# ============================================================
+
 $script:SshIdentityPath = $null
 
 function Set-SSHKeyPath {
-    <#
-    .SYNOPSIS
-        设置后续 SSH/SCP 使用的私钥路径（对齐 vm::set_ssh_key）
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     $script:SshIdentityPath = $Path
 }
 
 function Get-SshBaseArgs {
-    <#
-    .SYNOPSIS
-        公共 SSH 选项：StrictHostKeyChecking=no；UserKnownHostsFile 在 Windows 为 NUL（等价 Linux /dev/null）
-    #>
     [CmdletBinding()]
     param()
-    # 注意：不能用 $args 做变量名，它是 PowerShell 自动变量，在高级函数中只读
     $sshOpts = @(
-        '-A',
         '-o', 'StrictHostKeyChecking=no',
         '-o', 'UserKnownHostsFile=NUL',
         '-o', 'ConnectTimeout=10',
@@ -39,169 +36,22 @@ function Get-SshBaseArgs {
     return $sshOpts
 }
 
+# ============================================================
+# seed ISO 生成（与 hypervisor 无关）
+# ============================================================
+
 function Get-WindowsRepoRoot {
     $dir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
     return (Resolve-Path (Join-Path $dir '..\..')).Path
 }
 
-function Find-VBoxManage {
-    <#
-    .SYNOPSIS
-        定位 VBoxManage.exe 并缓存到 $script:VBoxManagePath
-    #>
-    [CmdletBinding()]
-    param()
-    if ($script:VBoxManagePath -and (Test-Path -LiteralPath $script:VBoxManagePath)) {
-        return $script:VBoxManagePath
-    }
-    $cmd = Get-Command 'VBoxManage.exe' -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
-        $script:VBoxManagePath = $cmd.Source
-        return $script:VBoxManagePath
-    }
-    $pf = $env:ProgramFiles
-    $pf86 = ${env:ProgramFiles(x86)}
-    $candidates = @(
-        (Join-Path $pf 'Oracle\VirtualBox\VBoxManage.exe'),
-        (Join-Path $pf86 'Oracle\VirtualBox\VBoxManage.exe')
-    )
-    foreach ($p in $candidates) {
-        if ($p -and (Test-Path -LiteralPath $p)) {
-            $script:VBoxManagePath = $p
-            return $script:VBoxManagePath
-        }
-    }
-    $script:VBoxManagePath = $null
-    return $null
-}
-
-function Install-VirtualBox {
-    <#
-    .SYNOPSIS
-        若未检测到 VBoxManage，则尝试 winget 安装；失败则提示手动下载
-    #>
-    [CmdletBinding()]
-    param()
-    if (Find-VBoxManage) {
-        Write-LogInfo '已检测到 VirtualBox（VBoxManage）。'
-        return
-    }
-    Write-LogWarn '未找到 VBoxManage，尝试使用 winget 安装 Oracle.VirtualBox ...'
-    try {
-        $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-        if (-not $winget) {
-            throw 'winget 不可用'
-        }
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget.exe install --id Oracle.VirtualBox -e --source winget --accept-package-agreements --accept-source-agreements
-        $ErrorActionPreference = $prevEAP
-        $script:VBoxManagePath = $null
-        Start-Sleep -Seconds 2
-    }
-    catch {
-        Write-LogWarn "winget 安装失败: $($_.Exception.Message)"
-    }
-    if (-not (Find-VBoxManage)) {
-        Write-LogError '自动安装未完成。请手动安装 VirtualBox:'
-        Write-LogError '  https://www.virtualbox.org/wiki/Downloads'
-        Write-LogError '安装后重新打开终端，或确认 VBoxManage.exe 在 PATH 中。'
-        throw 'VirtualBox 未安装或 VBoxManage 不在 PATH。'
-    }
-    Write-LogOk 'VirtualBox 已可用。'
-}
-
-function Invoke-VBoxManage {
-    param([string[]]$Arguments)
-    $exe = Find-VBoxManage
-    if (-not $exe) { throw 'VBoxManage 未找到，请先运行 Install-VirtualBox。' }
-    # PS 5.1 中 $ErrorActionPreference='Stop' 会把 stderr 当终止错误，需临时降级
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & $exe @Arguments
-    $ErrorActionPreference = $prevEAP
-    if ($LASTEXITCODE -ne 0) {
-        throw "VBoxManage 失败 (exit $LASTEXITCODE): VBoxManage $($Arguments -join ' ')"
-    }
-}
-
-function Test-VMExists {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Name)
-    $exe = Find-VBoxManage
-    if (-not $exe) { return $false }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $null = & $exe showvminfo $Name 2>&1
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    return ($code -eq 0)
-}
-
-function Test-VMRunning {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Name)
-    $exe = Find-VBoxManage
-    if (-not $exe) { return $false }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $lines = & $exe list runningvms 2>&1
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    if ($code -ne 0) { return $false }
-    $escaped = [regex]::Escape($Name)
-    foreach ($line in $lines) {
-        if ("$line" -match "`"$escaped`"") { return $true }
-    }
-    return $false
-}
-
-function New-VMDisk {
-    <#
-    .SYNOPSIS
-        将云镜像（qcow2/vdi 等）转为 VDI，并按需扩容（VBoxManage modifymedium --resize，单位为 MB）
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$SourceQcow2,
-        [Parameter(Mandatory)]
-        [string]$DestinationVdi,
-        [int]$SizeGB = 0
-    )
-    if (-not (Test-Path -LiteralPath $SourceQcow2)) {
-        throw "源文件不存在: $SourceQcow2"
-    }
-    if (Test-Path -LiteralPath $DestinationVdi) {
-        Write-LogWarn "VDI 已存在，跳过转换: $DestinationVdi"
-        return
-    }
-    $dir = Split-Path -Parent $DestinationVdi
-    if ($dir -and -not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-    Write-LogInfo "转换磁盘为 VDI: $DestinationVdi"
-    Invoke-VBoxManage @('clonemedium', 'disk', $SourceQcow2, $DestinationVdi, '--format', 'VDI')
-    if ($SizeGB -gt 0) {
-        $mb = [math]::Max(1, $SizeGB) * 1024
-        Write-LogInfo "调整虚拟磁盘大小为约 ${SizeGB}G (${mb} MB)..."
-        Invoke-VBoxManage @('modifymedium', 'disk', $DestinationVdi, '--resize', "$mb")
-    }
-    Write-LogOk 'VDI 准备完成。'
-}
-
 function New-ISOFromDirectory {
-    <#
-    .SYNOPSIS
-        使用 IMAPI2FS COM（Windows Vista+ 内置）从目录创建 ISO 镜像
-    #>
     param(
         [Parameter(Mandatory)][string]$SourceDir,
         [Parameter(Mandatory)][string]$OutputPath,
         [string]$VolumeName = 'CIDATA'
     )
 
-    # 添加 IStream 写入辅助类型
     $isoWriterType = 'KvmUbuntuISOWriter'
     if (-not ([System.Management.Automation.PSTypeName]$isoWriterType).Type) {
         Add-Type -TypeDefinition @"
@@ -263,16 +113,10 @@ function Find-Oscdimg {
 }
 
 function New-SeedISO {
-    <#
-    .SYNOPSIS
-        生成 cloud-init nocloud ISO：优先 oscdimg，其次仓库 windows/tools/mkisofs，否则报错
-    #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$UserDataPath,
-        [Parameter(Mandatory)]
-        [string]$SeedIsoPath,
+        [Parameter(Mandatory)][string]$UserDataPath,
+        [Parameter(Mandatory)][string]$SeedIsoPath,
         [string]$MetaDataPath = ''
     )
     if (-not (Test-Path -LiteralPath $UserDataPath)) {
@@ -290,7 +134,7 @@ function New-SeedISO {
             $metaContent = "instance-id: iid-local01`nlocal-hostname: ubuntu-server`n"
             [System.IO.File]::WriteAllText($metaDest, $metaContent, [System.Text.UTF8Encoding]::new($false))
         }
-        $netContent = "version: 2`nethernets:`n  all-en:`n    match:`n      name: `"e*`"`n    dhcp4: true`n"
+        $netContent = "version: 2`nethernets:`n  all-en:`n    match:`n      name: `"e*`"`n    dhcp4: true`n    dhcp-identifier: mac`n"
         [System.IO.File]::WriteAllText((Join-Path $tmp 'network-config'), $netContent, [System.Text.UTF8Encoding]::new($false))
 
         $isoDir = Split-Path -Parent $SeedIsoPath
@@ -325,7 +169,6 @@ function New-SeedISO {
             return
         }
 
-        # 使用 Windows 内置 IMAPI2FS COM 生成 ISO（Vista+ 均自带）
         Write-LogInfo '使用 IMAPI2FS 生成 seed ISO...'
         New-ISOFromDirectory -SourceDir $tmp -OutputPath $SeedIsoPath -VolumeName 'cidata'
         Write-LogOk 'seed ISO 创建完成。'
@@ -335,124 +178,136 @@ function New-SeedISO {
     }
 }
 
-function Get-FirstHostOnlyAdapterName {
-    $exe = Find-VBoxManage
-    if (-not $exe) { return $null }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $text = & $exe list hostonlyifs 2>&1 | Out-String
-    $ErrorActionPreference = $prevEAP
-    if ($text -match '(?m)^Name:\s+(.+)$') {
-        return $Matches[1].Trim()
+# ============================================================
+# VcXsrv（X11）
+# ============================================================
+
+function Find-VcXsrvExe {
+    [CmdletBinding()]
+    param()
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'VcXsrv\vcxsrv.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'VcXsrv\vcxsrv.exe')
+    )
+    foreach ($p in $candidates) {
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
     }
+    $cmd = Get-Command vcxsrv.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
     return $null
 }
 
+function Install-VcXsrv {
+    [CmdletBinding()]
+    param()
+    if (Find-VcXsrvExe) {
+        Write-LogInfo '已检测到 VcXsrv。'
+        return
+    }
+    $installed = $false
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-LogWarn '未找到 VcXsrv，尝试使用 winget 安装...'
+        try {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & winget.exe install --id marha.VcXsrv -e --source winget --accept-package-agreements --accept-source-agreements 2>$null
+            $ErrorActionPreference = $prevEAP
+            Start-Sleep -Seconds 3
+            if (Find-VcXsrvExe) { $installed = $true }
+        }
+        catch {
+            Write-LogWarn "winget 安装 VcXsrv 失败: $($_.Exception.Message)"
+        }
+    }
+    if (-not $installed) {
+        Write-LogWarn 'VcXsrv 未安装（X11 转发功能不可用，不影响 VM 正常使用）。'
+        Write-LogWarn '  如需 X11 转发，请手动安装: https://sourceforge.net/projects/vcxsrv/'
+        return
+    }
+    Write-LogOk 'VcXsrv 已可用。'
+}
+
+# ============================================================
+# Facade：统一 API（根据 Get-HypervisorType 委托）
+# ============================================================
+
+function Test-VMExists {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    switch (Get-HypervisorType) {
+        'hyperv' { return Test-HyperVVMExists -Name $Name }
+        default  { return Test-VBoxVMExists -Name $Name }
+    }
+}
+
+function Test-VMRunning {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    switch (Get-HypervisorType) {
+        'hyperv' { return Test-HyperVVMRunning -Name $Name }
+        default  { return Test-VBoxVMRunning -Name $Name }
+    }
+}
+
+function New-VMDisk {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourceImage,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [int]$SizeGB = 0
+    )
+    switch (Get-HypervisorType) {
+        'hyperv' { New-HyperVDisk -SourceImage $SourceImage -DestinationPath $DestinationPath -SizeGB $SizeGB }
+        default  { New-VBoxDisk -SourceImage $SourceImage -DestinationPath $DestinationPath -SizeGB $SizeGB }
+    }
+}
+
 function Install-VM {
-    <#
-    .SYNOPSIS
-        创建 VM：NIC1 NAT（外网）、NIC2 Host-Only（宿主机访问）；挂接 VDI + seed ISO，无界面启动
-    .NOTES
-        VirtualBox 无 Hyper-V 的 “Gen2” 概念；可通过 -Firmware efi 接近 UEFI 行为（若版本支持）。
-        nic2 使用经典 hostonly + hostonlyadapter2；VBox 7+ 的 hostonlynet 名称体系不同，需单独适配时可扩展。
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$VDIPath,
+        [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$SeedISOPath,
         [int]$MemoryMB = 4096,
         [int]$CpuCount = 2,
-        [ValidateSet('bios', 'efi', 'none')]
-        [string]$Firmware = 'bios',
-        [string]$HostOnlyAdapterName = '',
         [ValidateSet('nat', 'bridge')]
         [string]$NetworkMode = 'nat',
         [string]$BridgeAdapter = '',
         [string]$ConsoleLogPath = ''
     )
-    if (-not (Find-VBoxManage)) { Install-VirtualBox }
-    if (Test-VMExists -Name $Name) {
-        throw "VM 已存在: $Name"
-    }
-    if (-not (Test-Path -LiteralPath $VDIPath)) { throw "VDI 不存在: $VDIPath" }
-    if (-not (Test-Path -LiteralPath $SeedISOPath)) { throw "seed ISO 不存在: $SeedISOPath" }
-
-    $ho = $HostOnlyAdapterName
-    if ($NetworkMode -eq 'nat') {
-        if (-not $ho) {
-            $ho = Get-FirstHostOnlyAdapterName
+    switch (Get-HypervisorType) {
+        'hyperv' {
+            Install-HyperVVM -Name $Name -DiskPath $DiskPath -SeedISOPath $SeedISOPath `
+                -MemoryMB $MemoryMB -CpuCount $CpuCount `
+                -NetworkMode $NetworkMode -BridgeAdapter $BridgeAdapter `
+                -ConsoleLogPath $ConsoleLogPath
         }
-        if (-not $ho) {
-            throw '未找到 Host-Only 网络适配器。请在 VirtualBox 中创建 Host-Only 网络（管理 -> 主机网络管理器）。'
+        default {
+            Install-VBoxVM -Name $Name -DiskPath $DiskPath -SeedISOPath $SeedISOPath `
+                -MemoryMB $MemoryMB -CpuCount $CpuCount `
+                -NetworkMode $NetworkMode -BridgeAdapter $BridgeAdapter `
+                -ConsoleLogPath $ConsoleLogPath
         }
     }
-
-    $netDesc = if ($NetworkMode -eq 'bridge') { "NIC1=桥接 ($BridgeAdapter)" } else { "NIC1=NAT, NIC2=Host-Only ($ho)" }
-    Write-LogInfo "创建 VM: $Name (内存 ${MemoryMB}MB, CPU ${CpuCount})，$netDesc"
-
-    Invoke-VBoxManage @('createvm', '--name', $Name, '--ostype', 'Ubuntu_64', '--register')
-    Invoke-VBoxManage @('modifyvm', $Name, '--memory', "$MemoryMB", '--cpus', "$CpuCount", '--ioapic', 'on')
-    if ($Firmware -ne 'none') {
-        try {
-            Invoke-VBoxManage @('modifyvm', $Name, '--firmware', $Firmware)
-        }
-        catch {
-            Write-LogWarn "当前 VirtualBox 可能不支持 --firmware，已跳过: $($_.Exception.Message)"
-        }
-    }
-    if ($NetworkMode -eq 'bridge') {
-        if (-not $BridgeAdapter) {
-            throw 'NETWORK_MODE=bridge 时需要配置 BRIDGE_NAME（Windows 下为桥接网卡名称，见 VBoxManage list bridgedifs）。'
-        }
-        Invoke-VBoxManage @('modifyvm', $Name, '--nic1', 'bridged', '--bridgeadapter1', $BridgeAdapter)
-    }
-    else {
-        Invoke-VBoxManage @('modifyvm', $Name, '--nic1', 'nat')
-        Invoke-VBoxManage @('modifyvm', $Name, '--nic2', 'hostonly', '--hostonlyadapter2', $ho)
-    }
-
-    # NAT 端口转发：宿主机 127.0.0.1:2222 -> 客户机 :22（确保 SSH 可达）
-    Invoke-VBoxManage @('modifyvm', $Name, '--natpf1', 'ssh,tcp,,2222,,22')
-
-    # 首次引导从 seed ISO 加载 cloud-init，再落盘
-    Invoke-VBoxManage @('modifyvm', $Name, '--boot1', 'dvd', '--boot2', 'disk')
-
-    Invoke-VBoxManage @('storagectl', $Name, '--name', 'SATA', '--add', 'sata', '--controller', 'IntelAHCI')
-    Invoke-VBoxManage @('storageattach', $Name, '--storagectl', 'SATA', '--port', '0', '--device', '0', '--type', 'hdd', '--medium', $VDIPath)
-    Invoke-VBoxManage @('storageattach', $Name, '--storagectl', 'SATA', '--port', '1', '--device', '0', '--type', 'dvddrive', '--medium', $SeedISOPath)
-
-    # 串口重定向到文件，实时捕获 cloud-init 日志（console=ttyS0）
-    if ($ConsoleLogPath) {
-        $logDir = Split-Path -Parent $ConsoleLogPath
-        if ($logDir -and -not (Test-Path -LiteralPath $logDir)) {
-            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-        }
-        if (Test-Path -LiteralPath $ConsoleLogPath) {
-            Remove-Item -LiteralPath $ConsoleLogPath -Force
-        }
-        Invoke-VBoxManage @('modifyvm', $Name, '--uart1', '0x3F8', '4', '--uartmode1', 'file', $ConsoleLogPath)
-    }
-
-    Invoke-VBoxManage @('startvm', $Name, '--type', 'headless')
-    Write-LogOk "VM [$Name] 已创建并已 headless 启动。"
 }
 
 function Start-VM {
-    <#
-    .NOTES
-        若已加载 Hyper-V 模块，可能与 Microsoft.PowerShell.Management 中的 Start-VM 冲突；请使用模块路径限定或调整导入顺序。
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
-    if (-not (Find-VBoxManage)) { Install-VirtualBox }
-    Invoke-VBoxManage @('startvm', $Name, '--type', 'headless')
+    switch (Get-HypervisorType) {
+        'hyperv' { Start-HyperVVM -Name $Name }
+        default  { Start-VBoxVM -Name $Name }
+    }
 }
 
 function Stop-VM {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
-    Invoke-VBoxManage @('controlvm', $Name, 'poweroff')
+    switch (Get-HypervisorType) {
+        'hyperv' { Stop-HyperVVM -Name $Name }
+        default  { Stop-VBoxVM -Name $Name }
+    }
 }
 
 function Remove-VM {
@@ -461,164 +316,112 @@ function Remove-VM {
         [Parameter(Mandatory)][string]$Name,
         [string]$DataDir = ''
     )
-    if (-not (Test-VMExists -Name $Name)) {
-        Write-LogWarn "VM [$Name] 不存在"
-        return
+    switch (Get-HypervisorType) {
+        'hyperv' { Remove-HyperVVM -Name $Name -DataDir $DataDir }
+        default  { Remove-VBoxVM -Name $Name -DataDir $DataDir }
     }
-    if (Test-VMRunning -Name $Name) {
-        try { Invoke-VBoxManage @('controlvm', $Name, 'poweroff') } catch { Write-LogWarn "停止 VM 时出错（继续删除）: $($_.Exception.Message)" }
-        Start-Sleep -Seconds 2
-    }
-    Invoke-VBoxManage @('unregistervm', $Name, '--delete')
-    if ($DataDir -and (Test-Path -LiteralPath $DataDir)) {
-        foreach ($leaf in @(
-                "${Name}.vdi",
-                "${Name}-seed.iso",
-                'user-data.yaml'
-            )) {
-            $p = Join-Path $DataDir $leaf
-            if (Test-Path -LiteralPath $p) {
-                Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-    Write-LogOk "VM [$Name] 已删除。"
-}
-
-function Get-VMGuestPropertyIP {
-    param(
-        [string]$Name,
-        [string]$Property
-    )
-    $exe = Find-VBoxManage
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $out = & $exe guestproperty get $Name $Property 2>&1 | Out-String
-    $ErrorActionPreference = $prevEAP
-    if ($out -match 'Value:\s*(\d{1,3}(?:\.\d{1,3}){3})') {
-        return $Matches[1]
-    }
-    return $null
-}
-
-function Normalize-VBoxMac {
-    param([string]$Mac)
-    if (-not $Mac) { return $null }
-    return (($Mac -replace '[^0-9a-fA-F]', '').ToUpperInvariant())
-}
-
-function Get-VmMachineReadableValue {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$Key
-    )
-    $exe = Find-VBoxManage
-    if (-not $exe) { return $null }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $lines = & $exe showvminfo $Name --machinereadable 2>&1
-    $ErrorActionPreference = $prevEAP
-    $prefix = "$Key="
-    foreach ($line in $lines) {
-        if ($line.StartsWith($prefix)) {
-            $v = $line.Substring($prefix.Length)
-            if ($v.Length -ge 2 -and $v.StartsWith('"') -and $v.EndsWith('"')) {
-                return $v.Substring(1, $v.Length - 2)
-            }
-            return $v
-        }
-    }
-    return $null
-}
-
-function Search-IPInVBoxDhcpLeases {
-    param([string]$MacNormalized)
-    if (-not $MacNormalized) { return $null }
-    $root = Join-Path $env:USERPROFILE '.VirtualBox'
-    if (-not (Test-Path -LiteralPath $root)) { return $null }
-    $files = Get-ChildItem -LiteralPath $root -Recurse -Filter '*Dhcpd.leases' -ErrorAction SilentlyContinue
-    foreach ($f in $files) {
-        $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
-        if (-not $text) { continue }
-        foreach ($m in [regex]::Matches($text, '(?s)Lease\s*\{[^}]*MAC=([0-9A-Fa-f]+)[^}]*IP=([0-9.]+)')) {
-            if ((Normalize-VBoxMac $m.Groups[1].Value) -eq $MacNormalized) {
-                return $m.Groups[2].Value
-            }
-        }
-    }
-    return $null
 }
 
 function Get-VMIP {
-    <#
-    .SYNOPSIS
-        通过 Guest Additions 属性读取 IP（含 Net/1 等你指定的键）；失败则尝试解析 ARP 表（弱兜底）
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
-    if (-not (Find-VBoxManage)) { return $null }
-
-    $props = @(
-        '/VirtualBox/GuestInfo/Net/1/V4/IP',
-        '/VirtualBox/GuestInfo/Net/2/V4/IP',
-        '/VirtualBox/GuestInfo/Net/0/V4/IP'
-    )
-    foreach ($p in $props) {
-        $ip = Get-VMGuestPropertyIP -Name $Name -Property $p
-        if ($ip -and $ip -ne '0.0.0.0') { return $ip }
+    switch (Get-HypervisorType) {
+        'hyperv' { return Get-HyperVVMIP -Name $Name }
+        default  { return Get-VBoxVMIP -Name $Name }
     }
-
-    # Host-Only DHCP 租约（不依赖 Guest Additions）
-    foreach ($nic in @(2, 1)) {
-        $macRaw = Get-VmMachineReadableValue -Name $Name -Key "macaddress$nic"
-        $macN = Normalize-VBoxMac $macRaw
-        $leaseIp = Search-IPInVBoxDhcpLeases -MacNormalized $macN
-        if ($leaseIp) { return $leaseIp }
-    }
-
-    try {
-        $arp = arp.exe -a 2>$null | Out-String
-        foreach ($m in [regex]::Matches($arp, '\((\d{1,3}(?:\.\d{1,3}){3})\)')) {
-            $cand = $m.Groups[1].Value
-            if ($cand -notmatch '^169\.254\.') { return $cand }
-        }
-    }
-    catch { }
-
-    return $null
 }
 
 function Get-VMSshEndpoint {
-    <#
-    .SYNOPSIS
-        获取可用的 SSH 连接端点：优先 Host-Only IP:22，回退 NAT 端口转发 127.0.0.1:2222
-    .OUTPUTS
-        @{ Host = '...'; Port = N } 或 $null
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
-
-    # 先尝试 Host-Only IP
-    $hoIp = Get-VMIP -Name $Name
-    if ($hoIp -and $hoIp -ne '127.0.0.1' -and $hoIp -ne '10.0.2.15') {
-        return @{ Host = $hoIp; Port = 22 }
+    switch (Get-HypervisorType) {
+        'hyperv' { return Get-HyperVSshEndpoint -Name $Name }
+        default  { return Get-VBoxSshEndpoint -Name $Name }
     }
+}
 
-    # NAT 端口转发兜底
-    return @{ Host = '127.0.0.1'; Port = 2222 }
+function Get-VMStatus {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    switch (Get-HypervisorType) {
+        'hyperv' { return Get-HyperVVMStatus -Name $Name }
+        default  { return Get-VBoxVMStatus -Name $Name }
+    }
+}
+
+# ============================================================
+# SSH 就绪等待（无 cloud-init 监控，供 start 等场景复用）
+# ============================================================
+
+function Wait-VMSsh {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$User,
+        [int]$TimeoutSeconds = 120,
+        [int]$SshPort = 22
+    )
+    if (-not (Test-CommandExists 'ssh')) {
+        throw '未找到 ssh 命令'
+    }
+    $sshExe = (Get-Command 'ssh.exe' -CommandType Application -ErrorAction Stop).Source
+    $isVBox = (Get-HypervisorType) -eq 'vbox'
+    $t0 = Get-Date
+
+    $lastIp = $null
+    while (((Get-Date) - $t0).TotalSeconds -lt $TimeoutSeconds) {
+        Start-Sleep -Seconds 3
+
+        $candidates = @()
+        if ($isVBox) {
+            $candidates += @{ H = '127.0.0.1'; P = 2222 }
+            $hoIp = Get-VMIP -Name $Name
+            if ($hoIp -and $hoIp -ne '127.0.0.1' -and $hoIp -ne '10.0.2.15') {
+                $candidates += @{ H = $hoIp; P = $SshPort }
+            }
+        } else {
+            if ($lastIp) {
+                Test-Connection -ComputerName $lastIp -Count 1 -Quiet -ErrorAction SilentlyContinue | Out-Null
+            }
+            $hvIp = Get-VMIP -Name $Name
+            if ($hvIp) {
+                $lastIp = $hvIp
+            }
+            if ($lastIp) { $candidates += @{ H = $lastIp; P = $SshPort } }
+        }
+
+        foreach ($cand in $candidates) {
+            $testArgs = (Get-SshBaseArgs) + @(
+                '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=3',
+                '-p', "$($cand.P)", "${User}@$($cand.H)", 'echo ok'
+            )
+            $null = _Invoke-SshSilent $sshExe $testArgs
+            if ($LASTEXITCODE -eq 0) {
+                return @{ Host = $cand.H; Port = $cand.P }
+            }
+        }
+    }
+    return $null
+}
+
+# ============================================================
+# Wait-VMReady（通用：SSH 探测 + cloud-init 轮询）
+# ============================================================
+
+function _Invoke-SshSilent {
+    param([string]$SshExe, [string[]]$SshArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try { & $SshExe @SshArgs 2>&1 }
+    finally { $ErrorActionPreference = $prev }
 }
 
 function Wait-VMReady {
-    <#
-    .SYNOPSIS
-        实时输出串口日志，等待 SSH 可用，轮询 cloud-init 直至完成
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$User,
         [int]$TimeoutSeconds = 600,
-        [int]$IntervalSeconds = 5,
         [int]$SshPort = 22,
         [string]$ConsoleLogPath = ''
     )
@@ -626,7 +429,6 @@ function Wait-VMReady {
         throw '未找到 ssh 命令，请安装 OpenSSH 客户端或确保 ssh 在 PATH 中。'
     }
 
-    # 串口日志实时输出：用 script 作用域确保 offset 在调用间持久
     $script:_consoleLogOffset = 0
     $showLog = {
         if (-not $ConsoleLogPath -or -not (Test-Path -LiteralPath $ConsoleLogPath)) { return }
@@ -639,11 +441,10 @@ function Wait-VMReady {
                 $reader = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8, $false)
                 $newText = $reader.ReadToEnd()
                 if ($newText) {
-                    $lines = $newText -split "`n"
-                    foreach ($line in $lines) {
+                    foreach ($line in ($newText -split "`n")) {
                         $clean = $line.Trim()
                         if ($clean.Length -gt 0 -and $clean -match '[\x20-\x7E\u4e00-\u9fff]') {
-                            Write-Host $clean -ForegroundColor DarkGray
+                            Write-Host "$([char]0x1B)[90m$clean$([char]0x1B)[0m"
                         }
                     }
                 }
@@ -654,185 +455,183 @@ function Wait-VMReady {
         catch { }
     }
 
-    Write-LogInfo "等待 VM [$Name] 启动，实时串口日志如下..."
-    Write-Host '─────────── VM 串口输出 ───────────' -ForegroundColor DarkCyan
+    $hasConsoleLog = $ConsoleLogPath -and (Test-Path -LiteralPath $ConsoleLogPath)
+    if ($hasConsoleLog) {
+        Write-LogInfo "等待 VM [$Name] 启动，实时串口日志如下..."
+        Write-Host "$([char]0x1B)[36m─────────── VM 串口输出 ───────────$([char]0x1B)[0m"
+    } else {
+        Write-LogInfo "等待 VM [$Name] 启动（通过 SSH 轮询检测就绪状态）..."
+    }
 
     $sshExe = (Get-Command 'ssh.exe' -CommandType Application -ErrorAction Stop).Source
-
-    $elapsed = 0
+    $isVBox = (Get-HypervisorType) -eq 'vbox'
     $sshHost = $null
     $actualPort = $SshPort
     $sshReady = $false
     $diagShown = $false
-    while ($elapsed -lt $TimeoutSeconds) {
-        & $showLog
+    $lastIp = $null
+    $sshFailCount = 0
+    $lastProgressSec = 0
+    $vmRunning = $false
+    $t0 = Get-Date
 
-        if (Test-VMRunning -Name $Name) {
-            # 尝试 NAT 端口转发和 Host-Only IP
-            $candidates = @(
-                @{ H = '127.0.0.1'; P = 2222 }
-            )
+    while (((Get-Date) - $t0).TotalSeconds -lt $TimeoutSeconds) {
+        & $showLog
+        $wallSec = [int]((Get-Date) - $t0).TotalSeconds
+
+        if (-not $vmRunning) {
+            $vmRunning = Test-VMRunning -Name $Name
+            if (-not $vmRunning) {
+                Write-LogInfo "等待 VM 启动... (${wallSec}s)"
+                Start-Sleep -Seconds 3
+                continue
+            }
+        }
+
+        $candidates = @()
+        if ($isVBox) {
+            if (-not $lastIp) {
+                $lastIp = '127.0.0.1'
+            }
+            $candidates += @{ H = '127.0.0.1'; P = 2222 }
             $hoIp = Get-VMIP -Name $Name
             if ($hoIp -and $hoIp -ne '127.0.0.1' -and $hoIp -ne '10.0.2.15') {
                 $candidates += @{ H = $hoIp; P = $SshPort }
             }
-
-            foreach ($cand in $candidates) {
-                $testArgs = (Get-SshBaseArgs) + @(
-                    '-o', 'BatchMode=yes',
-                    '-p', "$($cand.P)",
-                    "${User}@$($cand.H)",
-                    'echo ok'
-                )
-                $prevEAP = $ErrorActionPreference
-                $ErrorActionPreference = 'SilentlyContinue'
-                $sshOut = & $sshExe @testArgs 2>&1
-                $sshCode = $LASTEXITCODE
-                $ErrorActionPreference = $prevEAP
-
-                if ($sshCode -eq 0) {
-                    $sshHost = $cand.H
-                    $actualPort = $cand.P
-                    $sshReady = $true
-                    break
+        }
+        else {
+            $needRediscover = (-not $lastIp) -or ($sshFailCount -gt 0 -and $sshFailCount % 6 -eq 0)
+            if ($needRediscover) {
+                if ($lastIp) {
+                    Test-Connection -ComputerName $lastIp -Count 1 -Quiet -ErrorAction SilentlyContinue | Out-Null
                 }
-
-                # 首次失败 60 秒后输出详细诊断
-                if ($elapsed -ge 60 -and -not $diagShown) {
-                    $diagShown = $true
-                    Write-LogWarn "SSH 连接失败 ($($cand.H):$($cand.P)): exit=$sshCode"
-
-                    # 验证端口转发规则
-                    $exe = Find-VBoxManage
-                    if ($exe) {
-                        $prevEAP2 = $ErrorActionPreference
-                        $ErrorActionPreference = 'SilentlyContinue'
-                        $vminfo = & $exe showvminfo $Name --machinereadable 2>&1 | Out-String
-                        $ErrorActionPreference = $prevEAP2
-                        if ($vminfo -match 'Forwarding') {
-                            $fwLines = ($vminfo -split "`n") | Where-Object { $_ -match 'Forwarding' }
-                            foreach ($fw in $fwLines) { Write-LogInfo "端口转发规则: $($fw.Trim())" }
-                        } else {
-                            Write-LogWarn '未检测到端口转发规则！'
-                        }
+                $hvIp = Get-VMIP -Name $Name
+                if ($hvIp) {
+                    if (-not $lastIp) {
+                        Write-LogInfo "VM 已获取 IP: $hvIp, 等待 SSH 就绪..."
+                    } elseif ($hvIp -ne $lastIp) {
+                        Write-LogInfo "VM IP 已变更: $lastIp -> $hvIp"
+                        $sshFailCount = 0
+                        $diagShown = $false
                     }
-
-                    # 使用 ssh -v 输出详细连接日志
-                    Write-LogInfo '详细 SSH 诊断（ssh -v）...'
-                    $diagArgs = @('-v', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=NUL',
-                        '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', '-p', "$($cand.P)")
-                    if ($script:SshIdentityPath -and (Test-Path -LiteralPath $script:SshIdentityPath)) {
-                        $diagArgs = @('-i', $script:SshIdentityPath) + $diagArgs
-                    }
-                    $diagArgs += @("${User}@$($cand.H)", 'echo ok')
-                    $prevEAP3 = $ErrorActionPreference
-                    $ErrorActionPreference = 'SilentlyContinue'
-                    $verboseOut = & $sshExe @diagArgs 2>&1
-                    $ErrorActionPreference = $prevEAP3
-                    foreach ($vl in $verboseOut) {
-                        $vs = "$vl".Trim()
-                        if ($vs) { Write-Host "  [ssh-v] $vs" -ForegroundColor DarkYellow }
-                    }
+                    $lastIp = $hvIp
+                } elseif (-not $lastIp) {
+                    Write-LogInfo "VM 正在运行，等待获取 IP 地址... (${wallSec}s)"
+                    Start-Sleep -Seconds 3
+                    continue
                 }
             }
+            $candidates += @{ H = $lastIp; P = $SshPort }
+        }
 
-            if ($sshReady) {
-                & $showLog
-                Write-Host '───────────────────────────────────' -ForegroundColor DarkCyan
-                Write-LogOk "SSH 已就绪: ${User}@${sshHost}:${actualPort}"
+        foreach ($cand in $candidates) {
+            $testArgs = @('-o', 'ConnectTimeout=5') + (Get-SshBaseArgs) + @(
+                '-o', 'BatchMode=yes',
+                '-p', "$($cand.P)", "${User}@$($cand.H)", 'echo ok'
+            )
+            $sshOut = _Invoke-SshSilent $sshExe $testArgs
+            if ($LASTEXITCODE -eq 0) {
+                $sshHost = $cand.H
+                $actualPort = $cand.P
+                $sshReady = $true
                 break
             }
         }
-        Start-Sleep -Seconds $IntervalSeconds
-        $elapsed += $IntervalSeconds
+
+        if ($sshReady) {
+            & $showLog
+            if ($hasConsoleLog) { Write-Host "$([char]0x1B)[36m───────────────────────────────────$([char]0x1B)[0m" }
+            Write-LogOk "SSH 已就绪: ${User}@${sshHost}:${actualPort}"
+            break
+        }
+
+        $sshFailCount++
+
+        if ($wallSec -ge 60 -and -not $diagShown) {
+            $diagShown = $true
+            Write-LogWarn "SSH 连接失败 ($($candidates[0].H):$($candidates[0].P))，运行诊断..."
+            $diagArgs = @('-v', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=NUL', '-o', 'BatchMode=yes', '-p', "$($candidates[0].P)")
+            if ($script:SshIdentityPath -and (Test-Path -LiteralPath $script:SshIdentityPath)) {
+                $diagArgs = @('-i', $script:SshIdentityPath) + $diagArgs
+            }
+            $diagArgs += @("${User}@$($candidates[0].H)", 'echo ok')
+            $verboseOut = _Invoke-SshSilent $sshExe $diagArgs
+            foreach ($vl in $verboseOut) {
+                $vs = "$vl".Trim()
+                if ($vs) { Write-Host "$([char]0x1B)[33m  [ssh-v] $vs$([char]0x1B)[0m" }
+            }
+        }
+        elseif ($wallSec - $lastProgressSec -ge 30) {
+            $lastProgressSec = $wallSec
+            $remaining = $TimeoutSeconds - $wallSec
+            Write-LogInfo "等待 SSH 就绪（cloud-init 初始化中）... (${wallSec}s/${TimeoutSeconds}s，剩余 ${remaining}s)"
+        }
+
+        Start-Sleep -Seconds 2
     }
+
     if (-not $sshReady) {
         & $showLog
-        Write-Host '───────────────────────────────────' -ForegroundColor DarkCyan
+        if ($hasConsoleLog) { Write-Host "$([char]0x1B)[36m───────────────────────────────────$([char]0x1B)[0m" }
         throw "SSH 在 ${TimeoutSeconds}s 内未就绪"
     }
 
-    # SSH 就绪后，检查 cloud-init 状态
+    # --- cloud-init monitoring ---
     $base = (Get-SshBaseArgs) + @('-p', "$actualPort")
-
-    $prevEAP2 = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    $ci = & $sshExe @base "${User}@${sshHost}" 'cloud-init status 2>/dev/null' 2>&1
-    $ErrorActionPreference = $prevEAP2
+    $ci = _Invoke-SshSilent $sshExe ($base + @("${User}@${sshHost}", 'cloud-init status 2>/dev/null'))
     if ("$ci" -match 'done') {
         Write-LogOk 'cloud-init 已完成'
         return @{ Host = $sshHost; Port = $actualPort }
     }
 
-    Write-LogInfo 'cloud-init 仍在运行，继续监控...'
-    $t0 = Get-Date
-    while (((Get-Date) - $t0).TotalSeconds -lt $TimeoutSeconds) {
-        Start-Sleep -Seconds 10
-        & $showLog
+    Write-LogInfo 'cloud-init 仍在运行，实时输出安装日志...'
+    Write-Host "$([char]0x1B)[36m─────────── cloud-init 输出 ───────────$([char]0x1B)[0m"
 
-        $prevEAP3 = $ErrorActionPreference
-        $ErrorActionPreference = 'SilentlyContinue'
-        $st = & $sshExe @base "${User}@${sshHost}" 'cloud-init status 2>/dev/null' 2>&1
-        $ErrorActionPreference = $prevEAP3
-        if ("$st" -match 'done|error|recoverable') {
-            & $showLog
-            if ("$st" -match 'done') {
-                Write-LogOk 'cloud-init 已完成'
-            }
-            else {
-                Write-LogWarn 'cloud-init 完成但有错误或恢复状态'
-                $prevEAP4 = $ErrorActionPreference
-                $ErrorActionPreference = 'SilentlyContinue'
-                & $sshExe @base "${User}@${sshHost}" 'cloud-init status --long 2>/dev/null' 2>&1 | Out-Host
-                $ErrorActionPreference = $prevEAP4
-            }
-            return @{ Host = $sshHost; Port = $actualPort }
+    $remoteCmd = 'sudo stdbuf -oL tail -n 50 -f /var/log/cloud-init-output.log 2>/dev/null & TAIL_PID=$!; while true; do sleep 5; ST=$(cloud-init status 2>/dev/null); case "$ST" in *done*|*error*|*recoverable*) break;; esac; done; sudo kill $TAIL_PID 2>/dev/null; wait $TAIL_PID 2>/dev/null; echo "___CI_FINAL___:$ST"'
+    $sshArgs = $base + @("${User}@${sshHost}", $remoteCmd)
+    $ciStatus = 'timeout'
+
+    _Invoke-SshSilent $sshExe $sshArgs | ForEach-Object {
+        $line = "$_".TrimEnd()
+        if ($line -match '^___CI_FINAL___:(.*)') {
+            $ciStatus = $Matches[1].Trim()
+        }
+        elseif ($line.Length -gt 0 -and $line -match '[\x20-\x7E\u4e00-\u9fff]') {
+            Write-Host "$([char]0x1B)[90m$line$([char]0x1B)[0m"
         }
     }
-    Write-LogWarn '等待 cloud-init 超时，仍返回当前连接信息'
+
+    Write-Host "$([char]0x1B)[36m───────────────────────────────────────$([char]0x1B)[0m"
+    if ("$ciStatus" -match 'done') {
+        Write-LogOk 'cloud-init 已完成'
+    }
+    elseif ("$ciStatus" -match 'error|recoverable') {
+        Write-LogWarn 'cloud-init 完成但有错误'
+        _Invoke-SshSilent $sshExe ($base + @("${User}@${sshHost}", 'cloud-init status --long 2>/dev/null')) | Out-Host
+    }
+    else {
+        Write-LogWarn '等待 cloud-init 超时'
+    }
     return @{ Host = $sshHost; Port = $actualPort }
 }
 
-function Get-VMStatus {
-    <#
-    .SYNOPSIS
-        输出 VM 信息（showvminfo 摘要）
-    #>
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Name)
-    if (-not (Find-VBoxManage)) { Install-VirtualBox }
-    if (-not (Test-VMExists -Name $Name)) {
-        Write-LogWarn "VM [$Name] 不存在"
-        return $false
-    }
-    $running = Test-VMRunning -Name $Name
-    Write-Host "VM 名称:  $Name"
-    Write-Host "运行状态: $(if ($running) { 'running' } else { 'poweroff' })"
-    if ($running) {
-        $ip = Get-VMIP -Name $Name
-        if ($ip) { Write-Host "IP 地址:  $ip" }
-        else { Write-Host 'IP 地址:  (获取中或未安装 Guest Additions / 未上报)' }
-    }
-    Write-Host '--- VBoxManage showvminfo ---'
-    Invoke-VBoxManage @('showvminfo', $Name)
-    return $true
-}
-
 Export-ModuleMember -Function @(
-    'Install-VirtualBox',
-    'Find-VBoxManage',
     'Set-SSHKeyPath',
     'Get-SshBaseArgs',
+    'New-SeedISO',
+    'Find-VcXsrvExe',
+    'Install-VcXsrv',
     'Test-VMExists',
     'Test-VMRunning',
     'New-VMDisk',
-    'New-SeedISO',
     'Install-VM',
     'Start-VM',
     'Stop-VM',
     'Remove-VM',
     'Get-VMIP',
     'Get-VMSshEndpoint',
-    'Wait-VMReady',
-    'Get-VMStatus'
+    'Get-VMStatus',
+    'Wait-VMSsh',
+    'Wait-VMReady'
 )

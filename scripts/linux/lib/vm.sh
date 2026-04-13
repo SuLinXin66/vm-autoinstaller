@@ -226,20 +226,29 @@ vm::wait_ready() {
     log::separator
 
     local tail_pid=""
-    _vm::_ssh_exec "$user" "$ip" "sudo tail -n 50 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 &
+    _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n 50 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 &
     tail_pid=$!
 
     while true; do
         sleep 10
 
         if ! kill -0 "$tail_pid" 2>/dev/null; then
-            log::info "SSH 连接中断，等待恢复..."
+            log::info "SSH 连接中断，尝试重新发现 IP 并恢复..."
             local rwait=0
             while (( rwait < 120 )); do
                 sleep 5
                 (( rwait += 5 ))
+
+                # Re-discover IP (DHCP may have reassigned)
+                local new_ip
+                new_ip="$(vm::get_ip "$name" 2>/dev/null)" || true
+                if [[ -n "$new_ip" && "$new_ip" != "$ip" ]]; then
+                    log::info "VM IP 已变更: ${ip} -> ${new_ip}"
+                    ip="$new_ip"
+                fi
+
                 if _vm::_ssh_test "$user" "$ip"; then
-                    log::ok "SSH 已恢复"
+                    log::ok "SSH 已恢复 (${user}@${ip})"
                     break
                 fi
             done
@@ -251,8 +260,15 @@ vm::wait_ready() {
                 echo "$ip"
                 return 0
             fi
+            if echo "$ci_status" | grep -q "error\|recoverable"; then
+                log::separator
+                log::warn "cloud-init 完成但有错误"
+                _vm::_ssh_exec "$user" "$ip" "cloud-init status --long 2>/dev/null" 2>/dev/null >&2 || true
+                echo "$ip"
+                return 0
+            fi
 
-            _vm::_ssh_exec "$user" "$ip" "sudo tail -n 10 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 &
+            _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n 10 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 &
             tail_pid=$!
             continue
         fi
@@ -377,6 +393,7 @@ METAEOF
     fi
 
     # Network config: DHCP on all ethernet interfaces
+    # dhcp-identifier: mac ensures consistent IP across boot stages
     cat > "${tmp_dir}/network-config" <<'NETEOF'
 version: 2
 ethernets:
@@ -384,6 +401,7 @@ ethernets:
     match:
       name: "e*"
     dhcp4: true
+    dhcp-identifier: mac
 NETEOF
 
     if utils::check_command cloud-localds; then
