@@ -24,6 +24,8 @@ output:
 # Enable serial console output in GRUB for future boots
 bootcmd:
   - [sh, -c, 'test -f /etc/default/grub && grep -q "console=ttyS0" /etc/default/grub || (sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyS0,115200 /" /etc/default/grub && update-grub)']
+  - [sh, -c, 'mkdir -p /etc/needrestart/conf.d && echo "\$nrconf{restart} = \"a\";" > /etc/needrestart/conf.d/99-auto.conf']
+  - [sh, -c, 'echo "DEBIAN_FRONTEND=noninteractive" >> /etc/environment && echo "NEEDRESTART_MODE=a" >> /etc/environment']
 
 apt:
   conf: |
@@ -32,6 +34,7 @@ apt:
       "--force-confold";
     };
     APT::Get::Assume-Yes "true";
+    DPkg::Pre-Invoke {"export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a";};
 
 package_update: true
 package_upgrade: true
