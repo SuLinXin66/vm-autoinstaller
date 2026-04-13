@@ -165,15 +165,42 @@ if [[ ! -x "$_POSH_BIN" ]]; then
 fi
 
 # ── 7. neovim 配置 ────────────────────────────────────────
-echo "[7/10] 克隆 neovim 配置..."
+echo "[7/11] 克隆 neovim 配置..."
 NVIM_CONFIG="${USER_HOME}/.config/nvim"
 if [[ ! -d "$NVIM_CONFIG" ]]; then
     sudo -u "$VM_USER" mkdir -p "${USER_HOME}/.config"
     net::ghclone "$(net::ghurl "https://github.com/SuLinXin66/nvim-config.git")" "$NVIM_CONFIG" "$VM_USER" || true
 fi
 
-# ── 8. 确保 ~/.local/bin 在 PATH 中（oh-my-posh 安装在此）+ TERM 回退 ──
-echo "[8/10] 配置 PATH 及终端兼容性..."
+# ── 8. neovim 插件同步（headless） ───────────────────────
+echo "[8/11] 同步 neovim 插件（LazyVim headless sync）..."
+if [[ -d "$NVIM_CONFIG" ]] && command -v nvim &>/dev/null; then
+    _nvim_sync_ok=false
+    if sudo -u "$VM_USER" bash -c "
+        export HOME='${USER_HOME}'
+        export PATH='/usr/local/bin:/usr/bin:/bin'
+        nvim --headless '+Lazy! sync' '+qa' 2>&1
+    " 2>&1 | sed 's/^/    /'; then
+        _nvim_sync_ok=true
+    fi
+
+    if [[ "$_nvim_sync_ok" == "true" ]]; then
+        echo "  neovim 插件同步完成"
+    else
+        echo ""
+        echo "  ╔═════════════════════════════════════════════════════════════╗"
+        echo "  ║  neovim 插件同步失败（可能是网络问题或超时）               ║"
+        echo "  ║  可稍后 SSH 进入 VM 手动执行:                              ║"
+        echo "  ║    nvim --headless '+Lazy! sync' '+qa'                     ║"
+        echo "  ╚═════════════════════════════════════════════════════════════╝"
+        echo ""
+    fi
+else
+    echo "  跳过：nvim 或配置目录不存在"
+fi
+
+# ── 9. 确保 ~/.local/bin 在 PATH 中（oh-my-posh 安装在此）+ TERM 回退 ──
+echo "[9/11] 配置 PATH 及终端兼容性..."
 _PROFILE="${USER_HOME}/.profile"
 if ! grep -q '.local/bin' "$_PROFILE" 2>/dev/null; then
     sudo -u "$VM_USER" bash -c "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> '$_PROFILE'"
@@ -190,12 +217,12 @@ fi
     printf '%s\n%s' "$_term_block" "$_old" | sudo -u "$VM_USER" tee "$_ZSHRC" > /dev/null
 fi
 
-# ── 9. 设置默认 shell ─────────────────────────────────────
-echo "[9/10] 设置默认 shell 为 zsh..."
+# ── 10. 设置默认 shell ────────────────────────────────────
+echo "[10/11] 设置默认 shell 为 zsh..."
 chsh -s "$(command -v zsh)" "$VM_USER"
 
-# ── 10. 验证 ─────────────────────────────────────────────
-echo "[10/10] 验证安装..."
+# ── 11. 验证 ──────────────────────────────────────────────
+echo "[11/11] 验证安装..."
 echo "  zsh:          $(zsh --version 2>/dev/null || echo '未安装')"
 echo "  fzf:          $(fzf --version 2>/dev/null || echo '未安装')"
 echo "  neovim:       $(nvim --version 2>/dev/null | head -1 || echo '未安装')"

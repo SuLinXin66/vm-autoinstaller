@@ -226,7 +226,7 @@ vm::wait_ready() {
     log::separator
 
     local tail_pid=""
-    _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n 50 -f /var/log/cloud-init-output.log 2>/dev/null" 2>/dev/null >&2 &
+    _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n +1 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 2>/dev/null &
     tail_pid=$!
 
     while true; do
@@ -268,7 +268,7 @@ vm::wait_ready() {
                 return 0
             fi
 
-            _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n 10 -f /var/log/cloud-init-output.log 2>/dev/null" 2>/dev/null >&2 &
+            _vm::_ssh_exec "$user" "$ip" "sudo stdbuf -oL tail -n 10 -f /var/log/cloud-init-output.log 2>/dev/null" >&2 2>/dev/null &
             tail_pid=$!
             continue
         fi

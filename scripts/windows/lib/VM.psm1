@@ -1,4 +1,4 @@
-﻿# VM Facade：统一 API + 通用函数（SSH、seed ISO、VcXsrv）
+# VM Facade：统一 API + 通用函数（SSH、seed ISO、VcXsrv）
 # 虚拟化操作委托给 Hypervisor.psm1 选定的后端（HyperV.psm1 / VBox.psm1）
 $ErrorActionPreference = 'Stop'
 
@@ -588,7 +588,7 @@ function Wait-VMReady {
     Write-LogInfo 'cloud-init 仍在运行，实时输出安装日志...'
     Write-Host "$([char]0x1B)[36m─────────── cloud-init 输出 ───────────$([char]0x1B)[0m"
 
-    $remoteCmd = 'sudo stdbuf -oL tail -n 50 -f /var/log/cloud-init-output.log 2>/dev/null & TAIL_PID=$!; while true; do sleep 5; ST=$(cloud-init status 2>/dev/null); case "$ST" in *done*|*error*|*recoverable*) break;; esac; done; sudo kill $TAIL_PID 2>/dev/null; wait $TAIL_PID 2>/dev/null; echo "___CI_FINAL___:$ST"'
+    $remoteCmd = 'sudo stdbuf -oL tail -n +1 -f /var/log/cloud-init-output.log 2>/dev/null & TAIL_PID=$!; while true; do sleep 5; ST=$(cloud-init status 2>/dev/null); case "$ST" in *done*|*error*|*recoverable*) break;; esac; done; sudo kill $TAIL_PID 2>/dev/null; wait $TAIL_PID 2>/dev/null; echo "___CI_FINAL___:$ST"'
     $sshArgs = $base + @("${User}@${sshHost}", $remoteCmd)
     $ciStatus = 'timeout'
 
