@@ -44,77 +44,21 @@ if [[ "$CN_MODE" == "1" ]]; then
         dbus-x11
 
     # Ubuntu 24.04 的 chromium-browser 是 snap 过渡包，snap store 在国内基本不可用
-    # 方案: 从 Debian 源安装真正的 chromium .deb（通过 USTC 镜像，国内极快）
+    # Debian bookworm/trixie 的 chromium .deb 在 Ubuntu 24.04 上必定依赖冲突
+    # 直接通过 Flatpak 安装（使用 SJTU 镜像，国内速度好）
     _chromium_ok=false
-    _arch="$(dpkg --print-architecture)"
 
-    echo "  从 Debian USTC 镜像安装 Chromium .deb（跳过 snap）..."
+    echo "  通过 Flatpak 安装 Chromium（SJTU 镜像）..."
+    apt-get install -y -q flatpak 2>/dev/null || true
 
-    # 获取 Debian 仓库签名密钥
-    _deb_keyring="/usr/share/keyrings/debian-archive-keyring.gpg"
-    if [[ ! -f "$_deb_keyring" ]]; then
-        apt-get install -y -q debian-archive-keyring 2>/dev/null || true
-    fi
+    if command -v flatpak &>/dev/null; then
+        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
+        flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub 2>/dev/null || true
 
-    # 如果 keyring 仍不存在，使用 trusted=yes 作为回退
-    if [[ -f "$_deb_keyring" ]]; then
-        _deb_signed="signed-by=${_deb_keyring}"
-    else
-        _deb_signed="trusted=yes"
-    fi
-
-    # 添加 Debian bookworm 源（仅用于 chromium），通过 USTC 镜像
-    echo "deb [arch=${_arch} ${_deb_signed}] https://mirrors.ustc.edu.cn/debian/ bookworm main" \
-        > /etc/apt/sources.list.d/debian-chromium.list
-
-    # APT 优先级钉扎：仅允许 chromium 相关包从 Debian 安装，其余全部屏蔽
-    cat > /etc/apt/preferences.d/debian-chromium.pref << 'PINEOF'
-Package: *
-Pin: release n=bookworm
-Pin-Priority: -10
-
-Package: chromium chromium-common chromium-sandbox chromium-l10n
-Pin: release n=bookworm
-Pin-Priority: 600
-PINEOF
-
-    apt-get update -q
-    if apt-get install -y -q chromium; then
-        _chromium_ok=true
-        echo "  Chromium (Debian .deb) 安装成功"
-    else
-        echo "  Debian bookworm 版本有依赖冲突，尝试 trixie (testing)..."
-        # 切换到 Debian trixie（与 Ubuntu 24.04 库版本更接近）
-        echo "deb [arch=${_arch} ${_deb_signed}] https://mirrors.ustc.edu.cn/debian/ trixie main" \
-            > /etc/apt/sources.list.d/debian-chromium.list
-        sed -i 's/bookworm/trixie/g' /etc/apt/preferences.d/debian-chromium.pref
-        apt-get update -q
-        if apt-get install -y -q chromium; then
+        if flatpak install -y flathub org.chromium.Chromium; then
             _chromium_ok=true
-            echo "  Chromium (Debian trixie .deb) 安装成功"
-        fi
-    fi
-
-    # Debian 源安装失败后清理，然后尝试 Flatpak 兜底
-    if [[ "$_chromium_ok" != "true" ]]; then
-        rm -f /etc/apt/sources.list.d/debian-chromium.list /etc/apt/preferences.d/debian-chromium.pref
-        apt-get update -q 2>/dev/null || true
-
-        echo "  Debian 源安装失败，尝试通过 Flatpak 安装 Chromium..."
-        apt-get install -y -q flatpak 2>/dev/null || true
-
-        if command -v flatpak &>/dev/null; then
-            flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
-            # 国内使用 SJTU Flathub 镜像
-            flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub 2>/dev/null || true
-
-            if flatpak install -y flathub org.chromium.Chromium; then
-                _chromium_ok=true
-                # host-etc 让 Flatpak 正确映射宿主 /etc → /run/host/etc/，
-                # Flathub Chromium 内置包装脚本会自动 symlink /etc/chromium → /run/host/etc/chromium
-                flatpak override --filesystem=host-etc:ro org.chromium.Chromium 2>/dev/null || true
-                echo "  Chromium (Flatpak) 安装成功"
-            fi
+            flatpak override --filesystem=host-etc:ro org.chromium.Chromium 2>/dev/null || true
+            echo "  Chromium (Flatpak) 安装成功"
         fi
     fi
 
