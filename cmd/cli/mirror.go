@@ -241,10 +241,23 @@ func ensureMirror() {
 	if !isVMRunning(cfg, vmName) {
 		return
 	}
-	ubuntuURL, dockerURL, display := resolveMirrorURLs(mirror)
+	ubuntuURL, _, display := resolveMirrorURLs(mirror)
+
+	out, err := sshExec(cfg, "cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null")
+	if err == nil && strings.Contains(out, strings.TrimRight(ubuntuURL, "/")) {
+		fmt.Printf("镜像源: %s\n", color.Green.Sprint(display))
+		return
+	}
+
+	// SSH 失败或源文件不存在时也跳过，不要在每次 setup 时触发 apt-get update
+	if err != nil {
+		return
+	}
+
+	_, dockerURL, _ := resolveMirrorURLs(mirror)
 	if err := applyMirrorToVM(cfg, ubuntuURL, dockerURL); err != nil {
 		color.Yellow.Printf("⚠ 镜像源应用失败: %v\n", err)
 	} else {
-		fmt.Printf("镜像源: %s\n", color.Green.Sprint(display))
+		fmt.Printf("镜像源: %s (已应用)\n", color.Green.Sprint(display))
 	}
 }
