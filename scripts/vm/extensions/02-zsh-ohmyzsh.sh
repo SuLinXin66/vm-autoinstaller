@@ -174,12 +174,21 @@ fi
 
 # ── 8. neovim 插件同步（headless） ───────────────────────
 echo "[8/11] 同步 neovim 插件（LazyVim headless sync）..."
+if [[ "$CN_MODE" == "1" ]]; then
+    echo "  CN_MODE: 配置 git GitHub 加速 (ghfast.top)..."
+    sudo -u "$VM_USER" git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"
+    sudo -u "$VM_USER" git config --global http.version HTTP/1.1
+    sudo -u "$VM_USER" git config --global http.postBuffer 524288000
+fi
 if [[ -d "$NVIM_CONFIG" ]] && command -v nvim &>/dev/null; then
     _nvim_sync_ok=false
     if sudo -u "$VM_USER" bash -c "
         export HOME='${USER_HOME}'
         export PATH='/usr/local/bin:/usr/bin:/bin'
+        echo '  [1/2] Lazy sync...'
         nvim --headless '+Lazy! sync' '+qa' 2>&1
+        echo '  [2/2] TSUpdate...'
+        nvim --headless '+TSUpdate' '+qa' 2>&1
     " 2>&1 | sed 's/^/    /'; then
         _nvim_sync_ok=true
     fi
