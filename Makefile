@@ -28,7 +28,7 @@ LDFLAGS  := -s -w \
   -X '$(MODULE)/internal/buildinfo.DefaultHypervisor=$(DEFAULT_HYPERVISOR)' \
   -X '$(MODULE)/internal/buildinfo.DefaultHyperVAutoStopService=$(DEFAULT_HYPERV_AUTO_STOP_SERVICE)'
 
-PLATFORMS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
+PLATFORMS := linux/amd64 linux/arm64 windows/amd64
 DIST      := dist
 
 .PHONY: all cli installer release clean tidy
