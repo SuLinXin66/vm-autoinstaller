@@ -239,11 +239,34 @@ func newSSHCmd() *cobra.Command {
 
 // --- setup ---
 
+// resolveAutoMirror tests mirrors and sets the best one if CN_MODE=1
+// and no explicit APT_MIRROR is configured.
+func resolveAutoMirror() {
+	cfg, _ := config.ReadEnv(paths.ConfigEnvPath())
+
+	cnMode := buildinfo.DefaultCNMode
+	aptMirror := buildinfo.DefaultAPTMirror
+	if cfg != nil {
+		if v, ok := cfg["CN_MODE"]; ok && v != "" {
+			cnMode = v
+		}
+		if v, ok := cfg["APT_MIRROR"]; ok && v != "" {
+			aptMirror = v
+		}
+	}
+
+	if cnMode == "1" && aptMirror == "" {
+		best := selectBestMirror()
+		runner.SetEnvOverride("APT_MIRROR", best)
+	}
+}
+
 func newSetupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
 		Short: "智能入口：VM 不存在时安装，已存在时启动",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveAutoMirror()
 			if err := runner.RunScript("setup", args...); err != nil {
 				return err
 			}
@@ -1221,7 +1244,7 @@ func cfgValCN(cfg map[string]string, key string) string {
 	}
 	switch key {
 	case "APT_MIRROR":
-		return "ustc"
+		return selectBestMirror()
 	case "GITHUB_PROXY":
 		return "https://ghfast.top/"
 	}

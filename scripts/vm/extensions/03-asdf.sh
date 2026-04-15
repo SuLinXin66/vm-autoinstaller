@@ -4,6 +4,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 source /opt/kvm-extensions/lib/net.sh
 net::init_proxy

@@ -7,8 +7,13 @@ _LIB_NET_LOADED=1
 
 _NET_GITHUB_PROXY=""
 
-# 初始化 GitHub 代理前缀（根据 CN_MODE 自动联动）
+# 初始化代理：HTTP 代理 + GitHub URL 前缀
 net::init_proxy() {
+    # 加载 cloud-init 注入的 HTTP 代理配置（非登录 shell 不会自动 source profile.d）
+    if [[ -z "${http_proxy:-}" && -f /etc/profile.d/proxy.sh ]]; then
+        source /etc/profile.d/proxy.sh
+    fi
+
     _NET_GITHUB_PROXY="${GITHUB_PROXY:-}"
     if [[ -z "$_NET_GITHUB_PROXY" && "${CN_MODE:-0}" == "1" ]]; then
         _NET_GITHUB_PROXY="https://ghfast.top/"
@@ -18,10 +23,14 @@ net::init_proxy() {
 # 为 GitHub URL 添加加速前缀
 net::ghurl() { echo "${_NET_GITHUB_PROXY}${1}"; }
 
-# 通用下载：重试 3 次 + 断点续传 + 超时 30 秒
+# 通用下载：重试 3 次 + 超时控制
 net::download() {
-    local url="$1" output="$2"
-    curl -fSL -C - --retry 3 --retry-delay 3 --connect-timeout 30 "$url" -o "$output"
+    local url="$1" output="$2" rc=0
+    curl -fSL --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 "$url" -o "$output" || rc=$?
+    if (( rc != 0 )); then
+        rm -f "$output"
+        return "$rc"
+    fi
     chmod a+r "$output" 2>/dev/null || true
 }
 
@@ -46,7 +55,9 @@ net::ghclone() {
                            -c http.postBuffer=524288000
                            clone --depth 1 "$url" "$dest")
         if [[ -n "$run_as" ]]; then
-            if sudo -u "$run_as" "${git_cmd[@]}" 2>&1; then return 0; fi
+            # --preserve-env ensures http_proxy/https_proxy are passed through sudo
+            if sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,no_proxy \
+                    -u "$run_as" "${git_cmd[@]}" 2>&1; then return 0; fi
         else
             if "${git_cmd[@]}" 2>&1; then return 0; fi
         fi

@@ -4,8 +4,10 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 source /opt/kvm-extensions/lib/net.sh
+source /opt/kvm-extensions/lib/pkg.sh
 net::init_proxy
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
@@ -32,7 +34,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/xpra.
     > /etc/apt/sources.list.d/xpra.list
 
 echo "[3/5] 更新 APT 索引..."
-apt-get update -q
+pkg::apt_update --force
 
 echo "[4/5] 安装浏览器、Xpra 及相关依赖..."
 if [[ "$CN_MODE" == "1" ]]; then
@@ -65,13 +67,12 @@ if [[ "$CN_MODE" == "1" ]]; then
     if [[ "$_chromium_ok" != "true" ]]; then
         echo ""
         echo "  ╔═════════════════════════════════════════════════════════════╗"
-        echo "  ║  Chromium 安装失败（可稍后 SSH 进入 VM 手动安装）          ║"
-        echo "  ║    sudo apt install -y flatpak                             ║"
-        echo "  ║    flatpak remote-add --if-not-exists flathub \\            ║"
-        echo "  ║      https://flathub.org/repo/flathub.flatpakrepo          ║"
+        echo "  ║  Chromium 安装失败（可重新运行 provision 重试）            ║"
+        echo "  ║  或 SSH 进入 VM 手动安装:                                  ║"
         echo "  ║    flatpak install -y flathub org.chromium.Chromium        ║"
         echo "  ╚═════════════════════════════════════════════════════════════╝"
         echo ""
+        exit 1
     fi
 
     # Chromium 书签策略（不论安装方式，Chromium 均读取此路径）

@@ -134,9 +134,11 @@ foreach ($f in $scripts) {
         $ok++
     }
     else {
-        Write-LogWarn "扩展 [$short] 执行失败，继续下一个..."
+        Write-LogError "扩展 [$short] 执行失败，中止后续扩展"
+        Write-LogInfo "修复后可重新运行: $($env:APP_NAME) provision"
         $fail++
         $failNames += $short
+        break
     }
 }
 
@@ -148,6 +150,7 @@ if ($skip -eq $scripts.Count) {
 } else {
     Write-LogWarn "成功: $ok, 失败: $fail, 跳过: $skip, 合计: $($scripts.Count)"
     Write-LogWarn "失败的扩展: $($failNames -join ', ')"
+    exit 1
 }
 
 # 同步内置配置到 VM

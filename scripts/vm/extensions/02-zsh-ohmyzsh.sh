@@ -5,8 +5,10 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 source /opt/kvm-extensions/lib/net.sh
+source /opt/kvm-extensions/lib/pkg.sh
 net::init_proxy
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
@@ -19,7 +21,7 @@ echo "[${EXTENSION_NAME}] 开始安装 zsh 终端环境..."
 
 # ── 1. 系统包 ──────────────────────────────────────────────
 echo "[1/10] 安装系统包..."
-apt-get update -q
+pkg::apt_update
 apt-get install -y -q \
     zsh fzf git curl unzip \
     ripgrep fd-find \
@@ -76,7 +78,7 @@ if ! command -v fastfetch &>/dev/null; then
     apt-get install -y -q fastfetch 2>/dev/null || {
         echo "  fastfetch 不在默认仓库，通过 PPA 安装..."
         add-apt-repository -y ppa:zhangsongcui3371/fastfetch 2>/dev/null || true
-        apt-get update -q
+        pkg::apt_update --force
         apt-get install -y -q fastfetch 2>/dev/null || echo "  警告: fastfetch 安装失败"
     }
 fi
@@ -174,22 +176,27 @@ fi
 
 # ── 8. neovim 插件同步（headless） ───────────────────────
 echo "[8/11] 同步 neovim 插件（LazyVim headless sync）..."
-if [[ "$CN_MODE" == "1" ]]; then
-    echo "  CN_MODE: 配置 git GitHub 加速 (ghfast.top)..."
-    sudo -u "$VM_USER" git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"
-    sudo -u "$VM_USER" git config --global http.version HTTP/1.1
-    sudo -u "$VM_USER" git config --global http.postBuffer 524288000
-fi
+
 if [[ -d "$NVIM_CONFIG" ]] && command -v nvim &>/dev/null; then
     _nvim_sync_ok=false
-    if sudo -u "$VM_USER" bash -c "
-        export HOME='${USER_HOME}'
-        export PATH='/usr/local/bin:/usr/bin:/bin'
-        echo '  [1/2] Lazy sync...'
-        nvim --headless '+Lazy! sync' '+qa' 2>&1
-        echo '  [2/2] TSUpdate...'
-        nvim --headless '+TSUpdate' '+qa' 2>&1
-    " 2>&1 | sed 's/^/    /'; then
+    _nvim_env="export HOME='${USER_HOME}' PATH='/usr/local/bin:/usr/bin:/bin'"
+    _nvim_preserve_env="http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,no_proxy"
+
+    if [[ -n "${http_proxy:-}" ]]; then
+        echo "  使用 HTTP 代理: ${http_proxy}"
+    fi
+
+    echo "  [1/3] Lazy sync..."
+    if sudo --preserve-env="${_nvim_preserve_env}" \
+            -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+Lazy! sync' '+qa' 2>&1" 2>&1 | sed 's/^/    /'; then
+        echo "  [2/3] TSUpdate..."
+        sudo --preserve-env="${_nvim_preserve_env}" \
+            -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+TSUpdate' '+qa' 2>&1" 2>&1 | sed 's/^/    /' || true
+
+        echo "  [3/3] Mason install..."
+        sudo --preserve-env="${_nvim_preserve_env}" \
+            -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+lua require(\"mason-registry\").refresh()' '+MasonInstallAll' '+sleep 30' '+qa' 2>&1" 2>&1 | sed 's/^/    /' || true
+
         _nvim_sync_ok=true
     fi
 

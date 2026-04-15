@@ -4,6 +4,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 EXTENSION_NAME="$(basename "${BASH_SOURCE[0]}" .sh)"
 

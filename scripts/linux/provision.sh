@@ -124,9 +124,11 @@ for ext in "${extensions[@]}"; do
         echo "${local_hash}" | _provision::ssh_exec "$ip" "sudo tee '${MARKER_DIR}/${name}.done' > /dev/null"
         (( ++succeeded )) || true
     else
-        log::warn "扩展 [${name}] 执行失败，继续下一个..."
+        log::error "扩展 [${name}] 执行失败，中止后续扩展"
+        log::info "修复后可重新运行: ${APP_NAME:-kvm-ubuntu} provision"
         (( ++failed )) || true
         failed_names+=("$name")
+        break
     fi
 done
 
@@ -138,6 +140,7 @@ elif (( failed == 0 )); then
 else
     log::warn "成功: ${succeeded}, 失败: ${failed}, 跳过: ${skipped}, 合计: ${#extensions[@]}"
     log::warn "失败的扩展: ${failed_names[*]}"
+    exit 1
 fi
 
 # ── 同步项目内置配置到 VM ──────────────────────────────────

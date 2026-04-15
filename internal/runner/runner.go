@@ -15,6 +15,13 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/paths"
 )
 
+var envOverrides = make(map[string]string)
+
+// SetEnvOverride sets a per-process env override applied by buildConfigEnv.
+func SetEnvOverride(key, value string) {
+	envOverrides[key] = value
+}
+
 // buildConfigEnv loads config.env, merges with KnownKeys defaults,
 // and returns a slice of KEY=VALUE strings for subprocess injection.
 func buildConfigEnv() []string {
@@ -26,6 +33,9 @@ func buildConfigEnv() []string {
 	for key, meta := range config.KnownKeys {
 		val := meta.DefaultValue
 		if v, ok := cfg[key]; ok && v != "" {
+			val = v
+		}
+		if v, ok := envOverrides[key]; ok && v != "" {
 			val = v
 		}
 		envs = append(envs, key+"="+val)

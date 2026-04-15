@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gookit/color"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -226,6 +229,138 @@ func restoreMirrorOnVM(cfg map[string]string) error {
 	}
 	_, err := sshExec(cfg, strings.Join(cmds, " && "))
 	return err
+}
+
+// --- Mirror auto-selection ---
+
+var versionCodenames = map[string]string{
+	"20.04": "focal",
+	"22.04": "jammy",
+	"24.04": "noble",
+	"24.10": "oracular",
+	"25.04": "plucky",
+}
+
+func resolveUbuntuCodename() string {
+	version := buildinfo.DefaultUbuntuVersion
+	cfg, err := config.ReadEnv(paths.ConfigEnvPath())
+	if err == nil {
+		if v, ok := cfg["UBUNTU_VERSION"]; ok && v != "" {
+			version = v
+		}
+	}
+	if c, ok := versionCodenames[version]; ok {
+		return c
+	}
+	return "noble"
+}
+
+func testURL(url string) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Head(url)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 400
+}
+
+var (
+	cachedBestMirror string
+	mirrorTestOnce   sync.Once
+)
+
+func selectBestMirror() string {
+	mirrorTestOnce.Do(func() {
+		cachedBestMirror = doSelectBestMirror()
+	})
+	return cachedBestMirror
+}
+
+func doSelectBestMirror() string {
+	codename := resolveUbuntuCodename()
+
+	type testResult struct {
+		idx     int
+		ubuntu  bool
+		docker  bool
+		latency time.Duration
+	}
+
+	results := make([]testResult, len(knownMirrors))
+	var wg sync.WaitGroup
+
+	fmt.Print("测试镜像源可用性... ")
+
+	for i, m := range knownMirrors {
+		wg.Add(1)
+		go func(idx int, m mirrorDef) {
+			defer wg.Done()
+			start := time.Now()
+
+			var ubuntuOK, dockerOK bool
+			var inner sync.WaitGroup
+
+			inner.Add(1)
+			go func() {
+				defer inner.Done()
+				ubuntuOK = testURL(m.UbuntuURL + "dists/" + codename + "/InRelease")
+			}()
+
+			inner.Add(1)
+			go func() {
+				defer inner.Done()
+				if m.DockerURL == "" {
+					dockerOK = true
+					return
+				}
+				dockerOK = testURL(m.DockerURL + "/dists/" + codename + "/InRelease")
+			}()
+
+			inner.Wait()
+
+			results[idx] = testResult{
+				idx:     idx,
+				ubuntu:  ubuntuOK,
+				docker:  dockerOK,
+				latency: time.Since(start),
+			}
+		}(i, m)
+	}
+
+	wg.Wait()
+
+	// Tier 1: both Ubuntu and Docker CE work, pick fastest
+	bestIdx := -1
+	for _, r := range results {
+		if r.ubuntu && r.docker {
+			if bestIdx == -1 || r.latency < results[bestIdx].latency {
+				bestIdx = r.idx
+			}
+		}
+	}
+	if bestIdx >= 0 {
+		m := knownMirrors[bestIdx]
+		fmt.Printf("%s (%dms)\n", color.Green.Sprint(m.Label), results[bestIdx].latency.Milliseconds())
+		return m.Name
+	}
+
+	// Tier 2: only Ubuntu works (Docker CE mirror out of sync, tolerable)
+	for _, r := range results {
+		if r.ubuntu {
+			if bestIdx == -1 || r.latency < results[bestIdx].latency {
+				bestIdx = r.idx
+			}
+		}
+	}
+	if bestIdx >= 0 {
+		m := knownMirrors[bestIdx]
+		color.Yellow.Printf("%s (%dms, Docker CE 镜像不可用)\n", m.Label, results[bestIdx].latency.Milliseconds())
+		return m.Name
+	}
+
+	color.Yellow.Println("所有镜像不可达，使用默认 (ustc)")
+	return "ustc"
 }
 
 func ensureMirror() {
