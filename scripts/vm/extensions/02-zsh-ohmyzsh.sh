@@ -20,14 +20,16 @@ ARCH="$(dpkg --print-architecture)"
 echo "[${EXTENSION_NAME}] 开始安装 zsh 终端环境..."
 
 # ── 1. 系统包 ──────────────────────────────────────────────
-echo "[1/10] 安装系统包..."
+echo "[1/11] 安装系统包..."
 pkg::apt_update
 apt-get install -y -q \
     zsh fzf git curl unzip \
     ripgrep fd-find \
     luarocks gcc make \
-    python3-venv \
+    python3-venv python3-pip \
     ncurses-term
+
+pip3 install --break-system-packages pynvim 2>/dev/null || true
 
 # fd-find 在 Ubuntu 上二进制名为 fdfind，创建 fd 软链接
 if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
@@ -84,7 +86,7 @@ if ! command -v fastfetch &>/dev/null; then
 fi
 
 # ── 2. lazygit（GitHub Release） ───────────────────────────
-echo "[2/10] 安装 lazygit..."
+echo "[2/11] 安装 lazygit..."
 if ! command -v lazygit &>/dev/null; then
     LAZYGIT_VERSION="$(net::ghlatest "$(net::ghurl "https://github.com/jesseduffield/lazygit/releases/latest")")"
     if [[ -n "$LAZYGIT_VERSION" ]]; then
@@ -105,7 +107,7 @@ if ! command -v lazygit &>/dev/null; then
 fi
 
 # ── 3. yazi（GitHub Release） ──────────────────────────────
-echo "[3/10] 安装 yazi..."
+echo "[3/11] 安装 yazi..."
 if ! command -v yazi &>/dev/null; then
     YAZI_VERSION="$(net::ghlatest "$(net::ghurl "https://github.com/sxyazi/yazi/releases/latest")")"
     if [[ -n "$YAZI_VERSION" ]]; then
@@ -127,7 +129,7 @@ if ! command -v yazi &>/dev/null; then
 fi
 
 # ── 4. oh-my-zsh ──────────────────────────────────────────
-echo "[4/10] 安装 oh-my-zsh..."
+echo "[4/11] 安装 oh-my-zsh..."
 OMZ_DIR="${USER_HOME}/.oh-my-zsh"
 if [[ ! -d "$OMZ_DIR" ]]; then
     # 直接 clone（而非 curl|bash），完全控制 git 操作的代理和重试
@@ -140,7 +142,7 @@ if [[ ! -d "$OMZ_DIR" ]]; then
 fi
 
 # ── 5. oh-my-zsh 第三方插件 ────────────────────────────────
-echo "[5/10] 安装 oh-my-zsh 第三方插件..."
+echo "[5/11] 安装 oh-my-zsh 第三方插件..."
 ZSH_CUSTOM="${OMZ_DIR}/custom"
 
 _clone_plugin() {
@@ -154,7 +156,7 @@ _clone_plugin "$(net::ghurl "https://github.com/zsh-users/zsh-autosuggestions.gi
 _clone_plugin "$(net::ghurl "https://github.com/zdharma-continuum/fast-syntax-highlighting.git")" "fast-syntax-highlighting"
 
 # ── 6. oh-my-posh ─────────────────────────────────────────
-echo "[6/10] 安装 oh-my-posh..."
+echo "[6/11] 安装 oh-my-posh..."
 _POSH_BIN="${USER_HOME}/.local/bin/oh-my-posh"
 if [[ ! -x "$_POSH_BIN" ]]; then
     _posh_script="$(mktemp)"
@@ -186,16 +188,12 @@ if [[ -d "$NVIM_CONFIG" ]] && command -v nvim &>/dev/null; then
         echo "  使用 HTTP 代理: ${http_proxy}"
     fi
 
-    echo "  [1/3] Lazy sync..."
+    echo "  [1/2] Lazy sync..."
     if sudo --preserve-env="${_nvim_preserve_env}" \
             -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+Lazy! sync' '+qa' 2>&1" 2>&1 | sed 's/^/    /'; then
-        echo "  [2/3] TSUpdate..."
+        echo "  [2/2] TSUpdate..."
         sudo --preserve-env="${_nvim_preserve_env}" \
             -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+TSUpdate' '+qa' 2>&1" 2>&1 | sed 's/^/    /' || true
-
-        echo "  [3/3] Mason install..."
-        sudo --preserve-env="${_nvim_preserve_env}" \
-            -u "$VM_USER" bash -c "${_nvim_env}; nvim --headless '+lua require(\"mason-registry\").refresh()' '+MasonInstallAll' '+sleep 30' '+qa' 2>&1" 2>&1 | sed 's/^/    /' || true
 
         _nvim_sync_ok=true
     fi
