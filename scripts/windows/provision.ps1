@@ -124,7 +124,7 @@ foreach ($f in $scripts) {
     $runCmd = "sudo CN_MODE='$cnMode' GITHUB_PROXY='$githubProxy' VM_USER='$vmUser' bash $remoteDir/$baseName"
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $sshExe @baseArgs "${vmUser}@${vmHost}" $runCmd 2>&1 | ForEach-Object { Write-Host $_ }
+    & $sshExe @baseArgs '-tt' "${vmUser}@${vmHost}" $runCmd
     $ErrorActionPreference = $prevEAP
     if ($LASTEXITCODE -eq 0) {
         $prevEAP = $ErrorActionPreference

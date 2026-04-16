@@ -91,7 +91,7 @@ else:
 with open(bp, "w") as f: json.dump(bk, f, ensure_ascii=False, indent=3)
 '@
     $pyTmp = New-TemporaryFile
-    Set-Content -Path $pyTmp.FullName -Value $pyScript -Encoding utf8NoBOM
+    [System.IO.File]::WriteAllText($pyTmp.FullName, $pyScript, [System.Text.UTF8Encoding]::new($false))
     $null = & $scpExe @scpBaseArgs $pyTmp.FullName "${vmUser}@${vmHost}:/tmp/_sync_bm.py" 2>&1
     Remove-Item $pyTmp.FullName -Force -ErrorAction SilentlyContinue
     $null = & $sshExe @baseArgs "${vmUser}@${vmHost}" 'python3 /tmp/_sync_bm.py /tmp/_managed_bookmarks.json; rm -f /tmp/_sync_bm.py /tmp/_managed_bookmarks.json' 2>&1

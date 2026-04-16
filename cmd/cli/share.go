@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +20,7 @@ import (
 	"github.com/SuLinXin66/vm-autoinstaller/internal/runner"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/share"
 	"github.com/SuLinXin66/vm-autoinstaller/internal/tui"
+	"github.com/SuLinXin66/vm-autoinstaller/internal/winsvc"
 )
 
 // ---------------------------------------------------------------------------
@@ -644,6 +647,9 @@ func sshMount(cfg map[string]string, mountPoint string) error {
 
 func isVMRunning(cfg map[string]string, vmName string) bool {
 	if runtime.GOOS == "windows" {
+		if isHyperV(cfg) {
+			return isHyperVVMRunning(vmName)
+		}
 		out, err := exec.Command(findVBoxManage(), "showvminfo", vmName, "--machinereadable").CombinedOutput()
 		if err != nil {
 			return false
@@ -663,6 +669,94 @@ func isVMRunning(cfg map[string]string, vmName string) bool {
 	}
 	info := parseVirshKV(out)
 	return info["State"] == "running"
+}
+
+func isHyperV(cfg map[string]string) bool {
+	hv := cfgVal(cfg, "HYPERVISOR")
+	if hv == "hyperv" {
+		return true
+	}
+	if hv == "vbox" {
+		return false
+	}
+	// auto: check if Hyper-V vmms service exists
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"(Get-Service vmms -ErrorAction SilentlyContinue).Status").CombinedOutput()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+func isHyperVVMRunning(vmName string) bool {
+	cmd := fmt.Sprintf(`try { $vm = Get-VM -Name '%s' -ErrorAction Stop; if ($vm.State -eq 'Running') { 'yes' } else { 'no' } } catch { 'no' }`, vmName)
+	out, err := elevatedPSOutput(cmd)
+	return err == nil && strings.TrimSpace(out) == "yes"
+}
+
+func getHyperVIP(vmName string) string {
+	script := fmt.Sprintf(`try {
+    $adapters = Get-VMNetworkAdapter -VMName '%s' -ErrorAction Stop
+    foreach ($a in $adapters) {
+        foreach ($ip in $a.IPAddresses) {
+            if ($ip -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$' -and $ip -ne '127.0.0.1') {
+                $ip; exit
+            }
+        }
+    }
+    $mac = $adapters[0].MacAddress
+    if ($mac -and $mac.Length -ge 12) {
+        $macFmt = ($mac -replace '(.{2})', '$1-').TrimEnd('-').ToUpper()
+        Get-NetNeighbor -ErrorAction SilentlyContinue |
+            Where-Object { $_.LinkLayerAddress -and $_.LinkLayerAddress.Replace(':','-').ToUpper() -eq $macFmt -and $_.State -ne 'Unreachable' } |
+            ForEach-Object { if ($_.IPAddress -match '^\d+\.\d+\.\d+\.\d+$' -and $_.IPAddress -ne '127.0.0.1') { $_.IPAddress; exit } }
+    }
+} catch {}`, vmName)
+	out, err := elevatedPSOutput(script)
+	if err != nil {
+		return ""
+	}
+	ip := strings.TrimSpace(out)
+	if ip != "" && !strings.Contains(ip, " ") {
+		return ip
+	}
+	return ""
+}
+
+// elevatedPSOutput executes a PowerShell command through the Named Pipe
+// elevation service (same mechanism as Invoke-ElevatedOutput in Sudo.psm1).
+// Falls back to direct execution if the service is unavailable.
+func elevatedPSOutput(command string) (string, error) {
+	conn, err := winsvc.TryConnect()
+	if err != nil {
+		out, e := exec.Command("powershell", "-NoProfile", "-Command", command).CombinedOutput()
+		return strings.TrimSpace(string(out)), e
+	}
+	defer conn.Close()
+
+	req := winsvc.ExecRequest{Type: "cmd", Command: command}
+	data, _ := json.Marshal(req)
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		return "", err
+	}
+
+	var output strings.Builder
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		var msg winsvc.StreamMsg
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case "out":
+			output.WriteString(msg.Data)
+		case "done":
+			if msg.Code != 0 {
+				return strings.TrimSpace(output.String()), fmt.Errorf("elevated command failed (exit %d)", msg.Code)
+			}
+			return strings.TrimSpace(output.String()), nil
+		}
+	}
+	return strings.TrimSpace(output.String()), fmt.Errorf("pipe closed unexpectedly")
 }
 
 func restartVM() error {

@@ -1272,6 +1272,13 @@ func knownHostsDevNull() string {
 
 func resolveSSHEndpoint(cfg map[string]string) (host, port string) {
 	if runtime.GOOS == "windows" {
+		vmName := cfgVal(cfg, "VM_NAME")
+		if isHyperV(cfg) {
+			if ip := getHyperVIP(vmName); ip != "" {
+				return ip, "22"
+			}
+			return "", ""
+		}
 		return "127.0.0.1", "2222"
 	}
 	vmName := cfgVal(cfg, "VM_NAME")
